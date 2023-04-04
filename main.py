@@ -38,17 +38,11 @@ class Skipera(object):
             }).json()
         for video in r["linked"]["onDemandCourseMaterialItems.v2"]:
             logger.info("Watching " + video["name"])
-            self.watch_module(video["id"])
+            self.watch_item(video["id"])
 
-    def watch_module(self, item_id):
+    def watch_item(self, item_id):
         r = self.session.post(self.base_url + f"opencourse.v1/user/{self.user_id}/course/{self.course}/item/{item_id}/lecture/videoEvents/ended?autoEnroll=false",
-            data='{"contentRequestBody":{}}', headers={
-                "x-crsf3-token": "1681448905.ModvqewqnjdnpSs4",
-                "x-csrf2-cookie": "csrf2_token_jj1kc9gp",
-                "x-csrf2-token": "CfRRROCd2dDv1JB6NIRbOt2u",
-                "x-csrftoken": "iuLzOHq0YfOxe23GujMzVSes"
-            })
-        print(r.request.url)
+            json={"contentRequestBody":{}})
         logger.info(r.content)
 
 @logger.catch

@@ -10,13 +10,20 @@ class Skipera(object):
         self.session.headers.update(config.HEADERS)
         self.session.cookies.update(config.COOKIES)
         self.course = course
-        self.get_userid()
+        self.get_userid() # check cookie validity
 
     def get_userid(self):
         r = self.session.get(self.base_url + "adminUserPermissions.v1?q=my").json()
-        self.user_id = r["elements"][0]["id"]
-        logger.info("User ID: " + self.user_id)
-
+        try:
+            self.user_id = r["elements"][0]["id"]
+            logger.info("User ID: " + self.user_id)
+        except KeyError:
+            if r.get("errorCode"):
+                logger.error("Error Encountered: " + r["errorCode"])
+                sys.exit(1)
+            else:
+                logger.error(r)
+                sys.exit(1)
 
     # hierarchy - Modules > Lessons > Items
     def get_modules(self):
@@ -42,8 +49,7 @@ class Skipera(object):
 
     def watch_item(self, item_id):
         r = self.session.post(self.base_url + f"opencourse.v1/user/{self.user_id}/course/{self.course}/item/{item_id}/lecture/videoEvents/ended?autoEnroll=false",
-            json={"contentRequestBody":{}})
-        logger.info(r.content)
+            json={"contentRequestBody":{}}).json()
 
 @logger.catch
 def main():

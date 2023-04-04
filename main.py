@@ -1,3 +1,5 @@
+# https://github.com/serv0id/skipera
+
 import requests, sys
 import config
 from loguru import logger

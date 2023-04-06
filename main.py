@@ -13,13 +13,17 @@ class Skipera(object):
         self.session.cookies.update(config.COOKIES)
         self.course = course
         if self.get_userid() == 0:
-            self.login()
+            self.login() # implementation pending
 
     def login(self):
+        logger.debug("Trying to log in using credentials")
         r = self.session.post(self.base_url + "login/v3", json={
+                "code": "",
                 "email": config.EMAIL,
-                "password": config.PASSWORD
+                "password": config.PASSWORD,
+                "webrequest": True,
             })
+
         logger.info(r.content)
 
     def get_userid(self):
@@ -58,6 +62,18 @@ class Skipera(object):
     def watch_item(self, item_id):
         r = self.session.post(self.base_url + f"opencourse.v1/user/{self.user_id}/course/{self.course}/item/{item_id}/lecture/videoEvents/ended?autoEnroll=false",
             json={"contentRequestBody":{}}).json()
+        if not r.get("contentResponseBody"):
+            logger.info("Not a watch item! Reading..")
+            self.read_item(item_id)
+
+    def read_item(self, item_id):
+        r = self.session.post(self.base_url + "onDemandSupplementCompletions.v1", json={
+                "courseId": self.course,
+                "itemId": item_id,
+                "userId": int(self.user_id)
+            })
+        print(r.request.body)
+        print(r.content)
 
 
 @logger.catch

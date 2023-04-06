@@ -73,11 +73,15 @@ class Skipera(object):
                 "userId": int(self.user_id)
             })
         if "Completed" not in r.text:
-            logger.debug("Item is a survey! Please complete it manually!")
+            logger.error("Item is a survey! Please complete it manually!")
 
 
 @logger.catch
 def main():
+    if len(sys.argv) < 2:
+        logger.error("Course slug not specified!")
+        return
+        
     skipera = Skipera(sys.argv[1])
     skipera.get_modules()
     skipera.get_items()

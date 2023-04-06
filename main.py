@@ -71,8 +71,8 @@ class Skipera(object):
                 "courseId": self.course_id,
                 "itemId": item_id,
                 "userId": int(self.user_id)
-            }).json()
-        if "Completed" not in r:
+            })
+        if "Completed" not in r.text:
             logger.debug("Item is a survey! Please complete it manually!")
 
 

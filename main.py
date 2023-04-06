@@ -62,18 +62,18 @@ class Skipera(object):
     def watch_item(self, item_id):
         r = self.session.post(self.base_url + f"opencourse.v1/user/{self.user_id}/course/{self.course}/item/{item_id}/lecture/videoEvents/ended?autoEnroll=false",
             json={"contentRequestBody":{}}).json()
-        if not r.get("contentResponseBody"):
+        if r.get("contentResponseBody") is None:
             logger.info("Not a watch item! Reading..")
             self.read_item(item_id)
 
     def read_item(self, item_id):
         r = self.session.post(self.base_url + "onDemandSupplementCompletions.v1", json={
-                "courseId": self.course,
+                "courseId": self.course_id,
                 "itemId": item_id,
                 "userId": int(self.user_id)
-            })
-        print(r.request.body)
-        print(r.content)
+            }).json()
+        if "Completed" not in r:
+            logger.debug("Item is a survey! Please complete it manually!")
 
 
 @logger.catch

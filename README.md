@@ -11,6 +11,6 @@ Surveys are not automatically completed since they are graded, thus needing user
 
 ## How to use
 * A sample config is provided in the repo. For now, cookie auth has been implemented since login requires reCaptcha.
-* Add your cookies to example config as key:value pairs (simple python dict). The presence of the "CAUTH" cookie is important.
+* Add your cookies to example config as key:value pairs (simple python dict). The presence of the "CAUTH" cookie is important. (https://github.com/serv0id/skipera/issues/1)
 * Rename `config_example.py` to `config.py`
 * `python3 main.py course-slug` where course-slug is present in the Coursera Course URL. Example: "introduction-psychology" (without the quotes) if the URL is https://www.coursera.org/learn/introduction-psychology/home/module/2.

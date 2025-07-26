@@ -15,7 +15,7 @@ class Skipera(object):
         self.session.headers.update(config.HEADERS)
         self.session.cookies.update(config.COOKIES)
         self.course = course
-        if self.get_userid() == 0:
+        if not self.get_userid():
             self.login()  # implementation pending
 
     def login(self):
@@ -37,8 +37,8 @@ class Skipera(object):
         except KeyError:
             if r.get("errorCode"):
                 logger.error("Error Encountered: " + r["errorCode"])
-            return 0
-        return 1
+            return False
+        return True
 
     # hierarchy - Modules > Lessons > Items
     def get_modules(self):

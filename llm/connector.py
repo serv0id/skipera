@@ -1,6 +1,5 @@
 # https://github.com/serv0id/skipera
 import json
-
 import requests
 from config import PERPLEXITY_API_URL, PERPLEXITY_API_KEY, PERPLEXITY_MODEL
 

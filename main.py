@@ -78,7 +78,10 @@ class Skipera(object):
             "userId": int(self.user_id)
         })
         if "Completed" not in r.text:
-            logger.error("Item is a survey! Please complete it manually!")
+            logger.debug("Item is a quiz/assignment!")
+            if "StaffGradedContent" in r.text:
+                logger.debug("Attempting to solve graded assessment..")
+                print(item_id)
 
 
 @logger.catch

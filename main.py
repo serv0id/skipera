@@ -1,14 +1,13 @@
 # https://github.com/serv0id/skipera
-
+import click
 import requests
-import sys
 import config
 from loguru import logger
 from assessment.solver import GradedSolver
 
 
 class Skipera(object):
-    def __init__(self, course):
+    def __init__(self, course: str, llm: bool):
         self.user_id = None
         self.course_id = None
         self.base_url = config.BASE_URL
@@ -16,6 +15,7 @@ class Skipera(object):
         self.session.headers.update(config.HEADERS)
         self.session.cookies.update(config.COOKIES)
         self.course = course
+        self.llm = llm
         if not self.get_userid():
             self.login()  # implementation pending
 
@@ -80,19 +80,18 @@ class Skipera(object):
         })
         if "Completed" not in r.text:
             logger.debug("Item is a quiz/assignment!")
-            if "StaffGradedContent" in r.text:
+            if "StaffGradedContent" in r.text and self.llm:
                 logger.debug("Attempting to solve graded assessment..")
                 solver = GradedSolver(self.session, self.course_id, item_id)
                 solver.solve()
 
 
 @logger.catch
-def main():
-    if len(sys.argv) < 2:
-        logger.error("Course slug not specified!")
-        return
-
-    skipera = Skipera(sys.argv[1])
+@click.command()
+@click.option('--slug', required=True, help="The course slug from the URL")
+@click.option('--llm', is_flag=True, help="Whether to use an LLM to solve graded assignments.")
+def main(slug: str, llm: bool) -> None:
+    skipera = Skipera(slug, llm)
     skipera.get_modules()
     skipera.get_items()
 

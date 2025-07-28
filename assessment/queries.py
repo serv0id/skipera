@@ -882,3 +882,28 @@ query AssignmentGradingStatus($courseId: ID!, $itemId: ID!) {
   }
 }
 """
+
+INITIATE_ATTEMPT_QUERY = """
+mutation Submission_StartAttempt($courseId: ID!, $itemId: ID!) {
+  Submission_StartAttempt(input: {courseId: $courseId, itemId: $itemId}) {
+    ... on Submission_StartAttemptSuccess {
+      submissionState {
+        assignment {
+          id
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    ... on Submission_StartAttemptFailure {
+      errors {
+        errorCode
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+"""

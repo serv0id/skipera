@@ -4,6 +4,7 @@ import requests
 import sys
 import config
 from loguru import logger
+from assessment.solver import GradedSolver
 
 
 class Skipera(object):
@@ -81,7 +82,8 @@ class Skipera(object):
             logger.debug("Item is a quiz/assignment!")
             if "StaffGradedContent" in r.text:
                 logger.debug("Attempting to solve graded assessment..")
-                print(item_id)
+                solver = GradedSolver(self.session, self.course_id, item_id)
+                solver.solve()
 
 
 @logger.catch

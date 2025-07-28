@@ -1,5 +1,5 @@
 # skipera
-Module to facilitate skipping Coursera (https://www.coursera.org/) videos.
+Module to facilitate skipping Coursera (https://www.coursera.org/) videos and assessments.
 
 ## Why?
 Skipera assists in automatically skip irrelevant MOOC courses which are made mandatory by universities. 
@@ -7,7 +7,7 @@ Many of such courses are allotted directly by the university as credit fillers a
 
 ## How?
 Skipera makes use of the Coursera web API and completes the videos + reading materials.
-Surveys are not automatically completed since they are graded, thus needing user interaction to complete.
+Graded assessments are completed with the assistance of an LLM API. Skipera currently supports the Perplexity API.
 
 ## How to use
 * A sample config is provided in the repo. For now, cookie auth has been implemented since login requires reCaptcha.

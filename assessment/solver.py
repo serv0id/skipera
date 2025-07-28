@@ -14,21 +14,32 @@ class GradedSolver(object):
         self.item_id: str = item_id
         self.attempt_id = None
         self.draft_id = None
+        self.discarded_questions = []
 
     def solve(self):
         state = self.get_state()
 
         if state["allowedAction"] == "RESUME_DRAFT":
-            logger.error("An attempt is in progress, please abort it manually.")
+            logger.error("An attempt is already in progress, please abort it manually.")
+            self.attempt_id = self.initiate_attempt()  # remove this
+            questions = self.retrieve_questions()
+            connector = PerplexityConnector()
+            answers = connector.get_response(questions)
+            self.save_responses(answers["responses"])
+            return
 
         elif state["allowedAction"] == "START_NEW_ATTEMPT":
             if state["attempts"]["attemptsRemaining"] == 0:
                 logger.error("No more attempts can be made!")
+                return
             else:
                 self.attempt_id = self.initiate_attempt()
                 questions = self.retrieve_questions()
                 connector = PerplexityConnector()
                 answers = connector.get_response(questions)
+                if not self.save_responses(answers):
+                    logger.error("Could not save responses. Please file an issue.")
+                    return
 
         else:
             logger.error("Something went wrong! Please file an issue.")
@@ -74,15 +85,18 @@ class GradedSolver(object):
         which are to be sent to the LLM Connector.
         """
         state = self.get_state()
-        draft = state["attempts"]["inProgressAttempt"]["draft"]
+        draft = state["attempts"]["inProgressAttempt"]
 
         self.draft_id = draft["id"]
-        questions = draft["parts"]
+        questions = draft["draft"]["parts"]
         questions_formatted = {}
 
         for question in questions:
             if not question["__typename"] in ["Submission_CheckboxQuestion", "Submission_MultipleChoiceQuestion"]:
-                continue
+                self.discarded_questions.append({
+                    "questionId": question["partId"],
+
+                })
 
             options = []
             for option in question["questionSchema"]["options"]:
@@ -98,3 +112,40 @@ class GradedSolver(object):
                                                        else "Multi-Choice"}
 
         return questions_formatted
+
+    def save_responses(self, answers: dict) -> bool:
+        """
+        Saves the responses for the assessment to the draft.
+        """
+        answer_responses = []
+
+        for answer in answers:
+            answer_responses.append({
+                "questionId": answer["question_id"],
+                "questionType": "MULTIPLE_CHOICE" if answer["type"] == "Single" else "CHECKBOX",
+                "questionResponse": {
+                    "multipleChoiceResponse" if answer["type"] == "Single" else "checkboxResponse": {
+                        "chosen": answer["option_id"][0] if answer["type"] == "Single" else answer["option_id"]
+                    }
+                }
+            })
+
+        res = self.session.post(url=GRAPHQL_URL, params={
+            "opname": "Submission_SaveResponses"
+        }, json={
+            "operationName": "Submission_SaveResponses",
+            "variables": {
+                "input": {
+                    "courseId": self.course_id,
+                    "itemId": self.item_id,
+                    "attemptId": self.draft_id,
+                    "questionResponses": answer_responses
+                }
+            },
+            "query": SAVE_RESPONSES_QUERY
+        })
+        print(self.draft_id)
+        print(res.json())
+        if "Submission_SaveResponsesSuccess" in res.text:
+            return True
+        return False

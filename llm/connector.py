@@ -3,13 +3,14 @@ import json
 import requests
 from config import PERPLEXITY_API_URL, PERPLEXITY_API_KEY, PERPLEXITY_MODEL
 from pydantic import BaseModel
-from typing import List
+from typing import List, Literal
 from loguru import logger
 
 
 class ResponseFormat(BaseModel):
     question_id: str
     option_id: List[str]
+    type: Literal["Single", "Multi"]
 
 
 class ResponseList(BaseModel):

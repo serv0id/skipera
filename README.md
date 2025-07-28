@@ -12,4 +12,6 @@ Graded assessments are completed with the assistance of an LLM API. Skipera curr
 ## How to use
 * A sample config is provided in the repo. For now, cookie auth has been implemented since login requires reCaptcha.
 * Add your cookies to the config as key-value pairs (simple python dict). The presence of the "CAUTH" cookie is important. (https://github.com/serv0id/skipera/issues/1)
-* `python3 main.py course-slug` where course-slug is present in the Coursera Course URL. Example: "introduction-psychology" (without the quotes) if the URL is https://www.coursera.org/learn/introduction-psychology/home/module/2.
+* Add your Perplexity API Key if you wish to use the LLM to solve graded assignments. 
+* `python3 main.py --slug course-slug` where course-slug is present in the Coursera Course URL. Example: "introduction-psychology" (without the quotes) if the URL is https://www.coursera.org/learn/introduction-psychology/home/module/2
+* Use the `--llm` flag if you wish to solve graded assignments automatically.

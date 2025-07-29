@@ -1,9 +1,10 @@
 import requests
+
+from assessment.types import QUESTION_TYPE_MAP, MODEL_MAP
 from config import GRAPHQL_URL
 from assessment.queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                                 GRADING_STATUS_QUERY, INITIATE_ATTEMPT_QUERY)
 from loguru import logger
-
 from llm.connector import PerplexityConnector
 
 
@@ -26,20 +27,19 @@ class GradedSolver(object):
             connector = PerplexityConnector()
             answers = connector.get_response(questions)
             self.save_responses(answers["responses"])
-            return
 
         elif state["allowedAction"] == "START_NEW_ATTEMPT":
             if state["attempts"]["attemptsRemaining"] == 0:
                 logger.error("No more attempts can be made!")
-                return
             else:
                 self.attempt_id = self.initiate_attempt()
                 questions = self.retrieve_questions()
                 connector = PerplexityConnector()
                 answers = connector.get_response(questions)
-                if not self.save_responses(answers):
+                if not self.save_responses(answers["responses"]):
                     logger.error("Could not save responses. Please file an issue.")
-                    return
+                else:
+                    self.submit_draft()
 
         else:
             logger.error("Something went wrong! Please file an issue.")
@@ -95,8 +95,13 @@ class GradedSolver(object):
             if not question["__typename"] in ["Submission_CheckboxQuestion", "Submission_MultipleChoiceQuestion"]:
                 self.discarded_questions.append({
                     "questionId": question["partId"],
-
+                    "questionType": QUESTION_TYPE_MAP[question["__typename"]][1],
+                    "questionResponse": {
+                        QUESTION_TYPE_MAP[question["__typename"]][0]: MODEL_MAP[question["__typename"]].
+                        model_construct().model_dump()
+                    }
                 })
+                continue
 
             options = []
             for option in question["questionSchema"]["options"]:
@@ -110,7 +115,6 @@ class GradedSolver(object):
                                                        "Type": "Single-Choice" if
                                                        question["__typename"] == "Submission_MultipleChoiceQuestion"
                                                        else "Multi-Choice"}
-
         return questions_formatted
 
     def save_responses(self, answers: dict) -> bool:
@@ -139,13 +143,18 @@ class GradedSolver(object):
                     "courseId": self.course_id,
                     "itemId": self.item_id,
                     "attemptId": self.draft_id,
-                    "questionResponses": answer_responses
+                    "questionResponses": [*answer_responses, *self.discarded_questions]
                 }
             },
             "query": SAVE_RESPONSES_QUERY
         })
-        print(self.draft_id)
-        print(res.json())
+
         if "Submission_SaveResponsesSuccess" in res.text:
             return True
         return False
+
+    def submit_draft(self):
+        """
+        Submits the draft for evaluation after the submission is saved.
+        """
+        pass

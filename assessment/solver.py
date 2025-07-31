@@ -1,6 +1,8 @@
+import time
+
 import requests
 
-from assessment.types import QUESTION_TYPE_MAP, MODEL_MAP
+from assessment.types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model
 from config import GRAPHQL_URL
 from assessment.queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                                 GRADING_STATUS_QUERY, INITIATE_ATTEMPT_QUERY)
@@ -22,24 +24,37 @@ class GradedSolver(object):
 
         if state["allowedAction"] == "RESUME_DRAFT":
             logger.error("An attempt is already in progress, please abort it manually.")
-            self.attempt_id = self.initiate_attempt()  # remove this
-            questions = self.retrieve_questions()
-            connector = PerplexityConnector()
-            answers = connector.get_response(questions)
-            self.save_responses(answers["responses"])
 
         elif state["allowedAction"] == "START_NEW_ATTEMPT":
+            if state["outcome"] is not None:
+                if state["outcome"]["isPassed"]:
+                    logger.debug("Already passed!")
+                    return
+
             if state["attempts"]["attemptsRemaining"] == 0:
                 logger.error("No more attempts can be made!")
+
             else:
-                self.attempt_id = self.initiate_attempt()
-                questions = self.retrieve_questions()
-                connector = PerplexityConnector()
-                answers = connector.get_response(questions)
-                if not self.save_responses(answers["responses"]):
-                    logger.error("Could not save responses. Please file an issue.")
+                if not self.initiate_attempt():
+                    logger.error("Could not start an attempt. Please file an issue.")
+
                 else:
-                    self.submit_draft()
+                    questions = self.retrieve_questions()
+                    connector = PerplexityConnector()
+                    answers = connector.get_response(questions)
+
+                    if not self.save_responses(answers["responses"]):
+                        logger.error("Could not save responses. Please file an issue.")
+
+                    else:
+                        if not self.submit_draft():
+                            logger.error("Could not submit the assignment. Please file an issue.")
+
+                        else:
+                            logger.debug("Waiting 3 seconds for grading..")
+                            time.sleep(3)  # delay for grading process
+                            if not self.get_grade():
+                                logger.error("Sorry! Could not pass the assignment, maybe use a better model.")
 
         else:
             logger.error("Something went wrong! Please file an issue.")
@@ -61,10 +76,9 @@ class GradedSolver(object):
 
         return res["data"]["SubmissionState"]["queryState"]
 
-    def initiate_attempt(self) -> str:
+    def initiate_attempt(self) -> bool:
         """
         Initiates a new attempt for the assessment.
-        Returns the attempt ID.
         """
         res = self.session.post(url=GRAPHQL_URL, params={
             "opname": "Submission_StartAttempt"
@@ -75,9 +89,11 @@ class GradedSolver(object):
                 "itemId": self.item_id
             },
             "query": INITIATE_ATTEMPT_QUERY
-        }).json()
+        })
 
-        return res["data"]["Submission_StartAttempt"]["submissionState"]["assignment"]["id"]
+        if "Submission_StartAttemptSuccess" in res.text:
+            return True
+        return False
 
     def retrieve_questions(self) -> dict:
         """
@@ -88,6 +104,7 @@ class GradedSolver(object):
         draft = state["attempts"]["inProgressAttempt"]
 
         self.draft_id = draft["id"]
+        self.attempt_id = draft["draft"]["id"]
         questions = draft["draft"]["parts"]
         questions_formatted = {}
 
@@ -97,8 +114,8 @@ class GradedSolver(object):
                     "questionId": question["partId"],
                     "questionType": QUESTION_TYPE_MAP[question["__typename"]][1],
                     "questionResponse": {
-                        QUESTION_TYPE_MAP[question["__typename"]][0]: MODEL_MAP[question["__typename"]].
-                        model_construct().model_dump()
+                        QUESTION_TYPE_MAP[question["__typename"]][0]:
+                        deep_blank_model(MODEL_MAP[question["__typename"]])
                     }
                 })
                 continue
@@ -151,10 +168,49 @@ class GradedSolver(object):
 
         if "Submission_SaveResponsesSuccess" in res.text:
             return True
+
+        logger.debug(res.json())
         return False
 
-    def submit_draft(self):
+    def submit_draft(self) -> bool:
         """
         Submits the draft for evaluation after the submission is saved.
         """
-        pass
+        res = self.session.post(url=GRAPHQL_URL, params={
+            "opname": "Submission_SubmitLatestDraft"
+        }, json={
+            "operationName": "Submission_SubmitLatestDraft",
+            "query": SUBMIT_DRAFT_QUERY,
+            "variables": {
+                "input": {
+                    "courseId": self.course_id,
+                    "itemId": self.item_id,
+                    "submissionId": self.attempt_id
+                }
+            }
+        })
+
+        if "Submission_SubmitLatestDraftSuccess" in res.text:
+            return True
+        return False
+
+    def get_grade(self) -> bool:
+        """
+        Retrieves the outcome for the submitted assignment.
+        """
+        res = self.session.post(url=GRAPHQL_URL, params={
+            "opname": "QueryState"
+        }, json={
+            "operationName": "QueryState",
+            "query": GET_STATE_QUERY,
+            "variables": {
+                "courseId": self.course_id,
+                "itemId": self.item_id
+            }
+        }).json()
+
+        outcome = res["data"]["SubmissionState"]["queryState"]["outcome"]
+
+        logger.debug(f"Achieved {outcome['earnedGrade']} grade. Passed? {outcome['isPassed']}")
+
+        return outcome['isPassed']

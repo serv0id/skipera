@@ -2,7 +2,6 @@
 from pydantic import BaseModel
 from typing import List, Optional, Any
 
-
 QUESTION_TYPE_MAP = {
     "Submission_CheckboxQuestion": ["checkboxResponse", "CHECKBOX"],
     "Submission_CheckboxReflectQuestion": ["checkboxReflectResponse", "CHECKBOX_REFLECT"],
@@ -117,3 +116,14 @@ MODEL_MAP = {
     "Submission_UrlQuestion": Submission_UrlQuestion,
     "Submission_WidgetQuestion": Submission_WidgetQuestion,
 }
+
+
+# Bad recursive function
+def deep_blank_model(model_cls):
+    data = {}
+    for name, field in model_cls.model_fields.items():
+        if hasattr(field.annotation, '__fields__'):
+            data[name] = deep_blank_model(field.annotation)
+        else:
+            data[name] = None
+    return data

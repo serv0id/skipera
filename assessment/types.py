@@ -1,7 +1,6 @@
 # webpack:///static/__generated__/graphql-types.ts
 from pydantic import BaseModel
-from typing import List, Optional, Any
-
+from typing import List, Optional, Any, Literal
 
 WHITELISTED_QUESTION_TYPES = ["Submission_CheckboxQuestion", "Submission_MultipleChoiceQuestion"]
 
@@ -67,7 +66,7 @@ class Submission_MultipleFillableBlanksQuestion(BaseModel):
 
 
 class Submission_NumericQuestion(BaseModel):
-    answer: str = ""
+    answer: Literal[""]  # :(
 
 
 class Submission_PlainTextQuestion(BaseModel):

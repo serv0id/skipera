@@ -2,6 +2,10 @@
 from pydantic import BaseModel
 from typing import List, Optional, Any
 
+
+WHITELISTED_QUESTION_TYPES = ["Submission_CheckboxQuestion", "Submission_MultipleChoiceQuestion"]
+
+
 QUESTION_TYPE_MAP = {
     "Submission_CheckboxQuestion": ["checkboxResponse", "CHECKBOX"],
     "Submission_CheckboxReflectQuestion": ["checkboxReflectResponse", "CHECKBOX_REFLECT"],
@@ -63,7 +67,7 @@ class Submission_MultipleFillableBlanksQuestion(BaseModel):
 
 
 class Submission_NumericQuestion(BaseModel):
-    answer: Optional[str] = None
+    answer: str = ""
 
 
 class Submission_PlainTextQuestion(BaseModel):

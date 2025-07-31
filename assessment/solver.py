@@ -2,7 +2,7 @@ import time
 
 import requests
 
-from assessment.types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model
+from assessment.types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model, WHITELISTED_QUESTION_TYPES
 from config import GRAPHQL_URL
 from assessment.queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                                 GRADING_STATUS_QUERY, INITIATE_ATTEMPT_QUERY)
@@ -109,7 +109,7 @@ class GradedSolver(object):
         questions_formatted = {}
 
         for question in questions:
-            if not question["__typename"] in ["Submission_CheckboxQuestion", "Submission_MultipleChoiceQuestion"]:
+            if not question["__typename"] in WHITELISTED_QUESTION_TYPES:
                 self.discarded_questions.append({
                     "questionId": question["partId"],
                     "questionType": QUESTION_TYPE_MAP[question["__typename"]][1],
@@ -169,6 +169,7 @@ class GradedSolver(object):
         if "Submission_SaveResponsesSuccess" in res.text:
             return True
 
+        logger.debug([*answer_responses, *self.discarded_questions])
         logger.debug(res.json())
         return False
 

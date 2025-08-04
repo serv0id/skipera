@@ -1,4 +1,6 @@
 # skipera
+<img width="96" height="96" alt="image" src="https://github.com/user-attachments/assets/8cf9428c-ef58-45b2-8fff-184ae353a890" />
+
 Module to facilitate skipping Coursera (https://www.coursera.org/) videos and assessments.
 
 ## Why?

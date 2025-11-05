@@ -20,15 +20,7 @@ class Skipera(object):
             self.login()  # implementation pending
 
     def login(self):
-        logger.debug("Trying to log in using credentials")
-        r = self.session.post(self.base_url + "login/v3", json={
-            "code": "",
-            "email": config.EMAIL,
-            "password": config.PASSWORD,
-            "webrequest": True,
-        })
-
-        logger.info(r.content)
+        raise NotImplementedError()
 
     def get_userid(self):
         r = self.session.get(self.base_url + "adminUserPermissions.v1?q=my").json()
@@ -68,6 +60,7 @@ class Skipera(object):
             self.base_url + f"opencourse.v1/user/{self.user_id}/course/{self.course}/item/{item_id}/lecture"
                             f"/videoEvents/ended?autoEnroll=false",
             json={"contentRequestBody": {}}).json()
+
         if r.get("contentResponseBody") is None:
             logger.info("Not a watch item! Reading..")
             self.read_item(item_id)

@@ -23,7 +23,7 @@ class Skipera(object):
     def login(self):
         raise NotImplementedError()  # implementation pending
 
-    def get_userid(self):
+    def get_userid(self) -> bool:
         r = self.session.get(self.base_url + "adminUserPermissions.v1?q=my").json()
         try:
             self.user_id = r["elements"][0]["id"]
@@ -34,7 +34,7 @@ class Skipera(object):
             return False
         return True
 
-    def get_course(self):
+    def get_course(self) -> None:
         r = self.session.get(self.base_url + f"onDemandCourseMaterials.v2/", params={
             "q": "slug",
             "slug": self.course,
@@ -54,13 +54,23 @@ class Skipera(object):
         }).json()
 
         self.course_id = r["elements"][0]["id"]
-        logger.debug("Course ID: " + self.course_id)
-        logger.debug("Number of Modules: " + str(len(r["linked"]["onDemandCourseMaterialModules.v1"])))
-        logger.info("Processing items..")
+
+        logger.info("Course ID: " + self.course_id)
+        logger.info("Number of Modules: " + str(len(r["linked"]["onDemandCourseMaterialModules.v1"])))
+        logger.debug("Processing items..")
+
         for item in r["linked"]["onDemandCourseMaterialItems.v2"]:
             if item["contentSummary"]["typeName"] == "lecture":
-                logger.debug(item["name"])
+                logger.info(item["name"])
                 self.watch_item(item, self.get_video_metadata(item["id"]))
+            elif item["contentSummary"]["typeName"] == "supplement":
+                self.read_item(item["id"])
+            elif item["contentSummary"]["typeName"] == "ungradedAssignment":
+                logger.info("Skipping ungraded assignment!")
+            elif item["contentSummary"]["typeName"] == "staffGraded" and self.llm:
+                logger.info("Attempting to solve graded assessment..")
+                solver = GradedSolver(self.session, self.course_id, item["id"])
+                solver.solve()
 
     def get_video_metadata(self, item_id: str) -> dict:
         r = self.session.get(self.base_url + f"onDemandLectureVideos.v1/{self.course_id}~{item_id}", params={
@@ -71,22 +81,18 @@ class Skipera(object):
         return {"can_skip": not r["elements"][0]["disableSkippingForward"],
                 "tracking_id": r["linked"]["onDemandVideos.v1"][0]["id"]}
 
-    def watch_item(self, item: dict, metadata: dict):
+    def watch_item(self, item: dict, metadata: dict) -> None:
         watcher = Watcher(self.session, item, metadata, self.user_id, self.course, self.course_id)
         watcher.watch_item()
 
-    def read_item(self, item_id):
+    def read_item(self, item_id) -> None:
         r = self.session.post(self.base_url + "onDemandSupplementCompletions.v1", json={
             "courseId": self.course_id,
             "itemId": item_id,
             "userId": int(self.user_id)
         })
         if "Completed" not in r.text:
-            logger.debug("Item is a quiz/assignment!")
-            if "StaffGradedContent" in r.text and self.llm:
-                logger.debug("Attempting to solve graded assessment..")
-                solver = GradedSolver(self.session, self.course_id, item_id)
-                solver.solve()
+            logger.debug("Couldn't read item!")
 
 
 @logger.catch

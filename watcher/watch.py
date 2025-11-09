@@ -1,4 +1,5 @@
 # https://github.com/serv0id/skipera
+import time
 
 import requests
 from loguru import logger
@@ -48,10 +49,15 @@ class Watcher(object):
                                     f'item/{self.item["id"]}/lecture/videoEvents/ended?autoEnroll=false',
                                 data='{"contentRequestBody":{}}')
 
+        print(res.text)
+
         if "Completed" not in res.text:
             logger.error(f"Couldn't end watching {self.item['name']}")
 
     def update_progress(self):
+        """
+        Updates the watchtime progress of a video.
+        """
         res = self.session.put(url=f'{config.BASE_URL}onDemandVideoProgresses.v1/{self.user_id}~{self.course_id}~'
                                    f'{self.metadata["tracking_id"]}',
                                json={
@@ -61,3 +67,5 @@ class Watcher(object):
 
         if res.status_code != 204:
             logger.error(f"Couldn't update progress for {self.item["name"]}")
+        else:
+            time.sleep(3)

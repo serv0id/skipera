@@ -4,6 +4,7 @@ import requests
 import config
 from loguru import logger
 from assessment.solver import GradedSolver
+from watcher.watch import Watcher
 
 
 class Skipera(object):
@@ -17,10 +18,10 @@ class Skipera(object):
         self.course = course
         self.llm = llm
         if not self.get_userid():
-            self.login()  # implementation pending
+            self.login()
 
     def login(self):
-        raise NotImplementedError()
+        raise NotImplementedError()  # implementation pending
 
     def get_userid(self):
         r = self.session.get(self.base_url + "adminUserPermissions.v1?q=my").json()
@@ -33,37 +34,46 @@ class Skipera(object):
             return False
         return True
 
-    # hierarchy - Modules > Lessons > Items
-    def get_modules(self):
-        r = self.session.get(self.base_url
-                             + f"onDemandCourseMaterials.v2/?q=slug&slug={self.course}&includes=modules").json()
+    def get_course(self):
+        r = self.session.get(self.base_url + f"onDemandCourseMaterials.v2/", params={
+            "q": "slug",
+            "slug": self.course,
+            "includes": "modules,lessons,passableItemGroups,passableItemGroupChoices,passableLessonElements,items,"
+                        "tracks,gradePolicy,gradingParameters,embeddedContentMapping",
+            "fields": "moduleIds,onDemandCourseMaterialModules.v1(name,slug,description,timeCommitment,lessonIds,"
+                      "optional,learningObjectives),onDemandCourseMaterialLessons.v1(name,slug,timeCommitment,"
+                      "elementIds,optional,trackId),onDemandCourseMaterialPassableItemGroups.v1(requiredPassedCount,"
+                      "passableItemGroupChoiceIds,trackId),onDemandCourseMaterialPassableItemGroupChoices.v1(name,"
+                      "description,itemIds),onDemandCourseMaterialPassableLessonElements.v1(gradingWeight,"
+                      "isRequiredForPassing),onDemandCourseMaterialItems.v2(name,originalName,slug,timeCommitment,"
+                      "contentSummary,isLocked,lockableByItem,itemLockedReasonCode,trackId,lockedStatus,itemLockSummary,"
+                      "customDisplayTypenameOverride),onDemandCourseMaterialTracks.v1(passablesCount),"
+                      "onDemandGradingParameters.v1(gradedAssignmentGroups),"
+                      "contentAtomRelations.v1(embeddedContentSourceCourseId,subContainerId)",
+            "showLockedItems": True
+        }).json()
+
         self.course_id = r["elements"][0]["id"]
         logger.debug("Course ID: " + self.course_id)
         logger.debug("Number of Modules: " + str(len(r["linked"]["onDemandCourseMaterialModules.v1"])))
-        for x in r["linked"]["onDemandCourseMaterialModules.v1"]:
-            logger.info(x["name"] + " -- " + x["id"])
+        logger.info("Processing items..")
+        for item in r["linked"]["onDemandCourseMaterialItems.v2"]:
+            if item["contentSummary"]["typeName"] == "lecture":
+                logger.debug(item["name"])
+                self.watch_item(item, self.get_video_metadata(item["id"]))
 
-    def get_items(self):
-        r = self.session.get(self.base_url + "onDemandCourseMaterials.v2/", params={
-            "q": "slug",
-            "slug": self.course,
-            "includes": "passableItemGroups,passableItemGroupChoices,items,tracks,gradePolicy,gradingParameters",
-            "fields": "onDemandCourseMaterialItems.v2(name,slug,timeCommitment,trackId)",
-            "showLockedItems": "true"
+    def get_video_metadata(self, item_id: str) -> dict:
+        r = self.session.get(self.base_url + f"onDemandLectureVideos.v1/{self.course_id}~{item_id}", params={
+            "includes": "video",
+            "fields": "disableSkippingForward,startMs,endMs"
         }).json()
-        for video in r["linked"]["onDemandCourseMaterialItems.v2"]:
-            logger.info("Watching " + video["name"])
-            self.watch_item(video["id"])
 
-    def watch_item(self, item_id):
-        r = self.session.post(
-            self.base_url + f"opencourse.v1/user/{self.user_id}/course/{self.course}/item/{item_id}/lecture"
-                            f"/videoEvents/ended?autoEnroll=false",
-            json={"contentRequestBody": {}}).json()
+        return {"can_skip": not r["elements"][0]["disableSkippingForward"],
+                "tracking_id": r["linked"]["onDemandVideos.v1"][0]["id"]}
 
-        if r.get("contentResponseBody") is None:
-            logger.info("Not a watch item! Reading..")
-            self.read_item(item_id)
+    def watch_item(self, item: dict, metadata: dict):
+        watcher = Watcher(self.session, item, metadata, self.user_id, self.course, self.course_id)
+        watcher.watch_item()
 
     def read_item(self, item_id):
         r = self.session.post(self.base_url + "onDemandSupplementCompletions.v1", json={
@@ -85,8 +95,7 @@ class Skipera(object):
 @click.option('--llm', is_flag=True, help="Whether to use an LLM to solve graded assignments.")
 def main(slug: str, llm: bool) -> None:
     skipera = Skipera(slug, llm)
-    skipera.get_modules()
-    skipera.get_items()
+    skipera.get_course()
 
 
 if __name__ == '__main__':

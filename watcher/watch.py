@@ -36,9 +36,7 @@ class Watcher(object):
                                     f'item/{self.item["id"]}/lecture/videoEvents/play?autoEnroll=false',
                                 data='{"contentRequestBody":{}}')
 
-        if "Started" in res.text:
-            logger.debug(f"Started video {self.item['name']}")
-        else:
+        if res.status_code != 200:
             logger.error(f"Couldn't start video {self.item['name']}!")
 
     def end_item(self):
@@ -61,5 +59,5 @@ class Watcher(object):
                                    "viewedUpTo": self.item["timeCommitment"]
                                })
 
-        if not res.status_code == 204:
+        if res.status_code != 204:
             logger.error(f"Couldn't update progress for {self.item["name"]}")

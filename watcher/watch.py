@@ -15,6 +15,10 @@ class Watcher(object):
         self.user_id = user_id
         self.course_id = course_id
 
+        self.session.headers.update({
+            "x-csrf3-token": "1763560945.17ISLo0AGTOEp8HU"  # TODO: randomise?
+        })
+
     def watch_item(self) -> None:
         if self.metadata["can_skip"]:
             logger.debug("Skippable video!")
@@ -50,7 +54,7 @@ class Watcher(object):
             logger.error(f"Couldn't end watching {self.item['name']}")
 
     def update_progress(self):
-        res = self.session.put(url=f'{config.BASE_URL}/onDemandVideoProgresses.v1/{self.user_id}~{self.course_id}~'
+        res = self.session.put(url=f'{config.BASE_URL}onDemandVideoProgresses.v1/{self.user_id}~{self.course_id}~'
                                    f'{self.metadata["tracking_id"]}',
                                json={
                                    "videoProgressId": f'{self.user_id}~{self.course_id}~{self.metadata["tracking_id"]}',

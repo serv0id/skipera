@@ -15,7 +15,7 @@ class Watcher(object):
         self.course_id = course_id
 
         self.session.headers.update({
-            "x-csrf3-token": "1763560945.17ISLo0AGTOEp8HU"  # TODO: randomise?
+            "x-csrf3-token": self.session.cookies["CSRF3-Token"]
         })
 
     def watch_item(self) -> None:
@@ -64,4 +64,4 @@ class Watcher(object):
         if res.status_code != 204:
             logger.error(f"Couldn't update progress for {self.item["name"]}")
         else:
-            time.sleep(3)
+            time.sleep(5)

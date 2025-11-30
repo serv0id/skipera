@@ -58,10 +58,10 @@ class Watcher(object):
                                    f'{self.metadata["tracking_id"]}',
                                json={
                                    "videoProgressId": f'{self.user_id}~{self.course_id}~{self.metadata["tracking_id"]}',
-                                   "viewedUpTo": self.item["timeCommitment"]
+                                   "viewedUpTo": self.item["timeCommitment"] + 2000
                                })
 
         if res.status_code != 204:
             logger.error(f"Couldn't update progress for {self.item["name"]}")
         else:
-            time.sleep(5)
+            time.sleep(1)

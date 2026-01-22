@@ -1,5 +1,3 @@
-# https://github.com/serv0id/skipera
-
 BASE_URL = "https://www.coursera.org/api/"
 GRAPHQL_URL = "https://www.coursera.org/graphql-gateway"
 

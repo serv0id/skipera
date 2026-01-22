@@ -1,4 +1,3 @@
-# https://github.com/serv0id/skipera
 import click
 import requests
 import config

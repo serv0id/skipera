@@ -212,6 +212,10 @@ class GradedSolver(object):
 
         outcome = res["data"]["SubmissionState"]["queryState"]["outcome"]
 
-        logger.debug(f"Achieved {outcome['earnedGrade']} grade. Passed? {outcome['isPassed']}")
+        if outcome is not None:
+            logger.debug(f"Achieved {outcome['earnedGrade']} grade. Passed? {outcome['isPassed']}")
+        else:
+            logger.debug("Outcome is None - check upstream logic")
+            return False
 
         return outcome['isPassed']

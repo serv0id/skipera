@@ -109,6 +109,9 @@ class GradedSolver(object):
         questions_formatted = {}
 
         for question in questions:
+            if not question["__typename"] in QUESTION_TYPE_MAP:  # discard unknown question types
+                continue
+
             if not question["__typename"] in WHITELISTED_QUESTION_TYPES:
                 self.discarded_questions.append({
                     "questionId": question["partId"],

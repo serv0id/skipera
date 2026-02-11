@@ -20,7 +20,7 @@ class Skipera(object):
             self.login()
 
     def login(self):
-        raise NotImplementedError()  # implementation pending
+        raise NotImplementedError()
 
     def get_userid(self) -> bool:
         r = self.session.get(self.base_url + "adminUserPermissions.v1?q=my").json()
@@ -50,7 +50,13 @@ class Skipera(object):
                       "onDemandGradingParameters.v1(gradedAssignmentGroups),"
                       "contentAtomRelations.v1(embeddedContentSourceCourseId,subContainerId)",
             "showLockedItems": True
-        }).json()
+        })
+
+        if r.status_code != 200:
+            logger.error("Please check if you are enrolled in the course!")
+            raise SystemExit
+
+        r = r.json()
 
         self.course_id = r["elements"][0]["id"]
 
@@ -96,7 +102,7 @@ class Skipera(object):
 
 @logger.catch
 @click.command()
-@click.option('--slug', required=True, help="The course slug from the URL")
+@click.argument('slug')
 @click.option('--llm', is_flag=True, help="Whether to use an LLM to solve graded assignments.")
 def main(slug: str, llm: bool) -> None:
     skipera = Skipera(slug, llm)

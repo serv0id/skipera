@@ -43,7 +43,7 @@ class GradedSolver(object):
                     connector = PerplexityConnector()
                     answers = connector.get_response(questions)
 
-                    if not self.save_responses(answers["responses"]):
+                    if not self.save_responses(answers):
                         logger.error("Could not save responses. Please file an issue.")
 
                     else:

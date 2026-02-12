@@ -13,7 +13,9 @@ Graded assessments are completed with the assistance of an LLM API.
 
 ## LLM Support
 If you wish to solve graded assignments automatically, you can add your perplexity API Key to the config and define a 
-relevant model. Note that an average 10 question assignment consumes ~5000 input tokens on average.
+relevant model.
+
+Every model listed at https://docs.perplexity.ai/docs/agent-api/models is available for use.
 
 Skipera currently only supports the Perplexity LLM API due to it being free in India. If you wish to use another LLM
 through an API, please feel free to make a pull request or contact me.

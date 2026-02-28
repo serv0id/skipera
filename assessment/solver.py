@@ -2,12 +2,13 @@ import time
 
 import requests
 
+import config
 from assessment.types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model, WHITELISTED_QUESTION_TYPES
 from config import GRAPHQL_URL
 from assessment.queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                                 GRADING_STATUS_QUERY, INITIATE_ATTEMPT_QUERY)
 from loguru import logger
-from llm.connector import PerplexityConnector
+from llm.connector import PerplexityConnector, GeminiConnector
 
 
 class GradedSolver(object):
@@ -19,7 +20,7 @@ class GradedSolver(object):
         self.draft_id = None
         self.discarded_questions = []
 
-    def solve(self):
+    def solve(self) -> None:
         state = self.get_state()
 
         if state["allowedAction"] == "RESUME_DRAFT":
@@ -39,8 +40,14 @@ class GradedSolver(object):
                     logger.error("Could not start an attempt. Please file an issue.")
 
                 else:
+                    if config.PERPLEXITY_API_KEY:
+                        connector = PerplexityConnector()
+                    elif config.GEMINI_API_KEY:
+                        connector = GeminiConnector()
+                    else:
+                        raise RuntimeError("No API Key specified.")
+
                     questions = self.retrieve_questions()
-                    connector = PerplexityConnector()
                     answers = connector.get_response(questions)
 
                     if not self.save_responses(answers["responses"]):

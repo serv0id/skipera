@@ -1,6 +1,6 @@
 # webpack:///static/__generated__/graphql-types.ts
 from pydantic import BaseModel
-from typing import List, Optional, Any, Literal
+from typing import List, Optional, Any, Literal, get_origin
 
 WHITELISTED_QUESTION_TYPES = ["Submission_CheckboxQuestion", "Submission_MultipleChoiceQuestion"]
 
@@ -125,8 +125,16 @@ MODEL_MAP = {
 def deep_blank_model(model_cls):
     data = {}
     for name, field in model_cls.model_fields.items():
-        if hasattr(field.annotation, '__fields__'):
-            data[name] = deep_blank_model(field.annotation)
+        annotation = field.annotation
+
+        if get_origin(annotation) is Literal:
+            literal_values = annotation.__args__
+            data[name] = literal_values[0]
+            continue
+
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            data[name] = deep_blank_model(annotation)
         else:
             data[name] = None
+
     return data

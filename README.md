@@ -12,11 +12,10 @@ Skipera makes use of the Coursera web API and completes the videos + reading mat
 Graded assessments are completed with the assistance of an LLM API.
 
 ## LLM Support
-If you wish to solve graded assignments automatically, you can add your perplexity API Key to the config and define a 
+If you wish to solve graded assignments automatically, you can add your Perplexity/Gemini API Key to the config and define a 
 relevant model. Note that an average 10 question assignment consumes ~5000 input tokens on average.
-
-Skipera currently only supports the Perplexity LLM API due to it being free in India. If you wish to use another LLM
-through an API, please feel free to make a pull request or contact me.
+ 
+If you wish to use another LLM through an API, please feel free to make a pull request or contact me.
 
 Currently, only the single-choice and multiple-choice objective questions are supported in this mode. Note that you might
 not always achieve passing marks due to the LLM hallucinating sometimes.
@@ -24,5 +23,5 @@ not always achieve passing marks due to the LLM hallucinating sometimes.
 ## How to use
 * A sample config is provided in the repo. For now, cookie auth has been implemented since login requires reCaptcha.
 * Add your cookies to the config as key-value pairs (simple python dict). The presence of the "CAUTH" cookie is important. (https://github.com/serv0id/skipera/issues/1)
-* Add your Perplexity API Key if you wish to use the LLM to solve graded assignments. Use the `--llm` flag if you wish to solve graded assignments automatically.
+* Add your Perplexity/Gemini API Key if you wish to use the LLM to solve graded assignments. Use the `--llm` flag if you wish to solve graded assignments automatically.
 * `python3 main.py course-slug` where course-slug is present in the Coursera Course URL. Example: "introduction-psychology" (without the quotes) if the URL is https://www.coursera.org/learn/introduction-psychology/home/module/2

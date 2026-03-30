@@ -62,6 +62,6 @@ class Watcher(object):
                                })
 
         if res.status_code != 204:
-            logger.error(f"Couldn't update progress for {self.item["name"]}")
+            logger.error(f"Couldn't update progress for {self.item['name']}")
         else:
             time.sleep(1)

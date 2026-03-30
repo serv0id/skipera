@@ -1,7 +1,7 @@
 import json
 import requests
-from config import (PERPLEXITY_API_URL, PERPLEXITY_API_KEY,
-                    PERPLEXITY_MODEL, GEMINI_API_KEY, GEMINI_MODEL, SYSTEM_PROMPT)
+from ..config import (PERPLEXITY_API_URL, PERPLEXITY_API_KEY,
+                      PERPLEXITY_MODEL, GEMINI_API_KEY, GEMINI_MODEL, SYSTEM_PROMPT)
 from google import genai
 from google.genai import types
 from pydantic import BaseModel

@@ -2,7 +2,7 @@
 import time
 import requests
 from loguru import logger
-import config
+from .. import config
 
 
 class Watcher(object):

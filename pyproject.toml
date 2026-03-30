@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skipera"
+version = "1.0.2"
+description = "Skip mandatory Coursera courses in seconds"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0",
+    "loguru>=0.7",
+    "pydantic>=2.0",
+    "requests>=2.28",
+    "browser-cookie3>=0.19",
+    "google-genai",
+]
+
+[project.scripts]
+skipera = "skipera.main:main"
+
+[project.urls]
+Homepage = "https://github.com/serv0id/skipera"
+Issues = "https://github.com/serv0id/skipera/issues"
+
+[tool.setuptools.packages.find]
+include = ["skipera*"]

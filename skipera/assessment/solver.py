@@ -23,45 +23,51 @@ class GradedSolver(object):
     def solve(self) -> None:
         state = self.get_state()
 
-        if state["allowedAction"] == "RESUME_DRAFT":
-            logger.error("An attempt is already in progress, please abort it manually.")
+        if state is None:
+            logger.error("State query returned None! The assessment might be locked due to incomplete prerequisites (like pending ungraded assignments).")
+            return
 
-        elif state["allowedAction"] == "START_NEW_ATTEMPT":
-            if state["outcome"] is not None:
-                if state["outcome"]["isPassed"]:
-                    logger.debug("Already passed!")
+        if state["allowedAction"] in ["RESUME_DRAFT", "START_NEW_ATTEMPT"]:
+            if state["allowedAction"] == "START_NEW_ATTEMPT":
+                if state["outcome"] is not None:
+                    if state["outcome"]["isPassed"]:
+                        logger.debug("Already passed!")
+                        return
+
+                if state["attempts"]["attemptsRemaining"] == 0:
+                    logger.error("No more attempts can be made!")
                     return
-
-            if state["attempts"]["attemptsRemaining"] == 0:
-                logger.error("No more attempts can be made!")
-
-            else:
+                
                 if not self.initiate_attempt():
                     logger.error("Could not start an attempt. Please file an issue.")
+                    return
+
+            if config.PERPLEXITY_API_KEY:
+                connector = PerplexityConnector()
+            elif config.GEMINI_API_KEY:
+                connector = GeminiConnector()
+            else:
+                raise RuntimeError("No API Key specified.")
+
+            questions = self.retrieve_questions()
+            try:
+                answers = connector.get_response(questions)
+            except Exception as e:
+                logger.error(f"Failed to get a response from the LLM provider! Error: {e}")
+                return
+
+            if not self.save_responses(answers["responses"]):
+                logger.error("Could not save responses. Please file an issue.")
+
+            else:
+                if not self.submit_draft():
+                    logger.error("Could not submit the assignment. Please file an issue.")
 
                 else:
-                    if config.PERPLEXITY_API_KEY:
-                        connector = PerplexityConnector()
-                    elif config.GEMINI_API_KEY:
-                        connector = GeminiConnector()
-                    else:
-                        raise RuntimeError("No API Key specified.")
-
-                    questions = self.retrieve_questions()
-                    answers = connector.get_response(questions)
-
-                    if not self.save_responses(answers["responses"]):
-                        logger.error("Could not save responses. Please file an issue.")
-
-                    else:
-                        if not self.submit_draft():
-                            logger.error("Could not submit the assignment. Please file an issue.")
-
-                        else:
-                            logger.debug("Waiting 3 seconds for grading..")
-                            time.sleep(3)  # delay for grading process
-                            if not self.get_grade():
-                                logger.error("Sorry! Could not pass the assignment, maybe use a better model.")
+                    logger.debug("Waiting 3 seconds for grading..")
+                    time.sleep(3)  # delay for grading process
+                    if not self.get_grade():
+                        logger.error("Sorry! Could not pass the assignment, maybe use a better model.")
 
         else:
             logger.error("Something went wrong! Please file an issue.")

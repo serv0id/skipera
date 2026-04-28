@@ -83,8 +83,13 @@ class Skipera(object):
             elif item["contentSummary"]["typeName"] == "supplement":
                 self.read_item(item["id"])
             elif item["contentSummary"]["typeName"] == "ungradedAssignment":
-                logger.info("Skipping ungraded assignment!")
-            elif item["contentSummary"]["typeName"] == "staffGraded" and self.llm:
+                if self.llm:
+                    logger.info("Attempting to solve ungraded assessment..")
+                    solver = GradedSolver(self.session, self.course_id, item["id"])
+                    solver.solve()
+                else:
+                    logger.info("Skipping ungraded assignment!")
+            elif item["contentSummary"]["typeName"] in ["staffGraded", "exam", "quiz"] and self.llm:
                 logger.info("Attempting to solve graded assessment..")
                 solver = GradedSolver(self.session, self.course_id, item["id"])
                 solver.solve()

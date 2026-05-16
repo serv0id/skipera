@@ -229,3 +229,15 @@ class GradedSolver(object):
             return False
 
         return outcome['isPassed']
+    
+    def complete_ungraded(self) -> None:
+        """
+        Completes an ungraded/practice assignment using LLM to answer questions.
+        Practice assignments require 75% passing score, so blank submission won't work.
+        """
+        if not (config.PERPLEXITY_API_KEY or config.GEMINI_API_KEY):
+            logger.error("Practice assignments require an LLM API key to pass. Add Perplexity or Gemini key to config.")
+            return
+        
+        logger.info("Solving practice assignment with LLM...")
+        self.solve()

@@ -83,12 +83,15 @@ class Skipera(object):
             elif item["contentSummary"]["typeName"] == "supplement":
                 self.read_item(item["id"])
             elif item["contentSummary"]["typeName"] == "ungradedAssignment":
-                logger.info("Skipping ungraded assignment!")
+                logger.info(f"Completing practice assignment: {item['name']}")
+                solver = GradedSolver(self.session, self.course_id, item["id"])
+                solver.complete_ungraded()              
             elif item["contentSummary"]["typeName"] == "staffGraded" and self.llm:
                 logger.info("Attempting to solve graded assessment..")
                 solver = GradedSolver(self.session, self.course_id, item["id"])
                 solver.solve()
-
+            else:
+                logger.opt(colors=True).info(f"<red>Unhandled item type:</red> {item['contentSummary']['typeName']} - {item['name']}")
     def get_video_metadata(self, item_id: str) -> dict:
         r = self.session.get(self.base_url + f"onDemandLectureVideos.v1/{self.course_id}~{item_id}", params={
             "includes": "video",

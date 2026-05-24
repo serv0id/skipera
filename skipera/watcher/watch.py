@@ -1,8 +1,8 @@
 # https://github.com/serv0id/skipera
-import time
 import requests
 from loguru import logger
 from .. import config
+from ..session_utils import get_csrf_headers, random_delay
 
 
 class Watcher(object):
@@ -14,11 +14,7 @@ class Watcher(object):
         self.user_id = user_id
         self.course_id = course_id
 
-        self.session.headers.update({
-            "x-csrf3-token": self.session.cookies["CSRF3-Token"]
-        })
-
-    def watch_item(self) -> None:
+    def watch_item(self) -> bool:
         if self.metadata["can_skip"]:
             logger.debug("Skippable video!")
             self.end_item()
@@ -26,13 +22,15 @@ class Watcher(object):
             self.start_item()
             self.update_progress()
             self.end_item()
+        return True
 
     def start_item(self):
         """
         Start watching a video item.
         """
         res = self.session.post(url=f'{config.BASE_URL}opencourse.v1/user/{self.user_id}/course/{self.slug}/'
-                                    f'item/{self.item["id"]}/lecture/videoEvents/play?autoEnroll=false',
+                                f'item/{self.item["id"]}/lecture/videoEvents/play?autoEnroll=false',
+                                headers=get_csrf_headers(self.session),
                                 data='{"contentRequestBody":{}}')
 
         if res.status_code != 200:
@@ -44,7 +42,8 @@ class Watcher(object):
         Can be called directly for a skippable video.
         """
         res = self.session.post(url=f'{config.BASE_URL}opencourse.v1/user/{self.user_id}/course/{self.slug}/'
-                                    f'item/{self.item["id"]}/lecture/videoEvents/ended?autoEnroll=false',
+                                f'item/{self.item["id"]}/lecture/videoEvents/ended?autoEnroll=false',
+                                headers=get_csrf_headers(self.session),
                                 data='{"contentRequestBody":{}}')
 
         if res.status_code != 200:
@@ -55,13 +54,14 @@ class Watcher(object):
         Updates the watchtime progress of a video.
         """
         res = self.session.put(url=f'{config.BASE_URL}onDemandVideoProgresses.v1/{self.user_id}~{self.course_id}~'
-                                   f'{self.metadata["tracking_id"]}',
+                               f'{self.metadata["tracking_id"]}',
+                               headers=get_csrf_headers(self.session),
                                json={
                                    "videoProgressId": f'{self.user_id}~{self.course_id}~{self.metadata["tracking_id"]}',
                                    "viewedUpTo": self.item["timeCommitment"] + 2000
-                               })
+        })
 
         if res.status_code != 204:
             logger.error(f"Couldn't update progress for {self.item['name']}")
         else:
-            time.sleep(1)
+            random_delay(1.0, 3.0)

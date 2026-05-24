@@ -4,7 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 
-CONFIG_DIR = Path.home() / ".skipera"
+CONFIG_DIR = Path.cwd() / ".skipera"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULT_CONFIG = {
@@ -12,7 +12,7 @@ DEFAULT_CONFIG = {
     "perplexity_api_key": "",
     "gemini_api_key": "",
     "perplexity_model": "sonar-pro",
-    "gemini_model": "gemini-3-flash-preview"
+    "gemini_model": "gemini-3.1-flash-lite"
 }
 
 
@@ -20,7 +20,8 @@ def fetch_browser_cookies() -> dict:
     try:
         import browser_cookie3
     except ImportError:
-        logger.error("browser-cookie3 not installed. Run: pip install browser-cookie3")
+        logger.error(
+            "browser-cookie3 not installed. Run: pip install browser-cookie3")
         return {}
 
     browsers = [
@@ -39,7 +40,8 @@ def fetch_browser_cookies() -> dict:
         except Exception:
             continue
 
-    logger.warning("Could not find Coursera cookies in any browser. Make sure you're logged into Coursera.")
+    logger.warning(
+        "Could not find Coursera cookies in any browser. Make sure you're logged into Coursera.")
     return {}
 
 
@@ -51,14 +53,16 @@ def load_config() -> dict:
     config = json.loads(CONFIG_FILE.read_text())
 
     if not config.get("cookies"):
-        logger.info("No cookies in config — attempting to fetch from browser...")
+        logger.info(
+            "No cookies in config — attempting to fetch from browser...")
         cookies = fetch_browser_cookies()
         if cookies:
             config["cookies"] = cookies
             CONFIG_FILE.write_text(json.dumps(config, indent=2))
             logger.info(f"Cookies saved to {CONFIG_FILE}")
         else:
-            logger.error(f"No cookies found. Log into Coursera in your browser and retry, or manually edit {CONFIG_FILE}")
+            logger.error(
+                f"No cookies found. Log into Coursera in your browser and retry, or manually edit {CONFIG_FILE}")
             sys.exit(1)
 
     return config
@@ -76,17 +80,7 @@ COOKIES = _config["cookies"]
 PERPLEXITY_API_KEY = _config.get("perplexity_api_key", "")
 GEMINI_API_KEY = _config.get("gemini_api_key", "")
 PERPLEXITY_MODEL = _config.get("perplexity_model", "sonar-pro")
-GEMINI_MODEL = _config.get("gemini_model", "gemini-3-flash-preview")
-
-SYSTEM_PROMPT = (
-    "Answer the provided many questions."
-    "Be precise and concise. The questions are in a dict format "
-    "with the key representing the question id and the value a "
-    "JSON dict containing several things. "
-    "Questions may have single-choice or multiple-choice answers, "
-    "which would be specified by the user in the JSON data. "
-    "The question/option values might have HTML data but ignore that."
-)
+GEMINI_MODEL = _config.get("gemini_model", "gemini-3.1-flash-lite")
 
 HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',

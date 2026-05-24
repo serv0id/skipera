@@ -588,6 +588,7 @@ fragment AcademicIntegritySettings on Integrity_IntegritySettings {
 fragment Assignment on Submission_Assignment {
   id
   passingFraction
+  assignmentType
   assignmentGradingType
   gradeSelectionStrategy
   requiredMobileFeatures
@@ -861,28 +862,6 @@ mutation Submission_SubmitLatestDraft(
 }
 """
 
-GRADING_STATUS_QUERY = """
-query AssignmentGradingStatus($courseId: ID!, $itemId: ID!) {
-  SubmissionState {
-    queryState(courseId: $courseId, itemId: $itemId) {
-      ... on Submission_QueryStateFailure {
-        errors {
-          message
-          __typename
-        }
-        __typename
-      }
-      ... on Submission_SubmissionState {
-        gradingStatus
-        __typename
-      }
-      __typename
-    }
-    __typename
-  }
-}
-"""
-
 INITIATE_ATTEMPT_QUERY = """
 mutation Submission_StartAttempt($courseId: ID!, $itemId: ID!) {
   Submission_StartAttempt(input: {courseId: $courseId, itemId: $itemId}) {
@@ -905,5 +884,745 @@ mutation Submission_StartAttempt($courseId: ID!, $itemId: ID!) {
     }
     __typename
   }
+}
+"""
+
+ASSIGNMENT_FEEDBACK_QUERY = """
+fragment FullFeedback on Submission_Feedback {
+  assignmentLevelRubrics {
+    ...RubricFeedback
+    __typename
+  }
+  feedbackId: id
+  outcome {
+    ...OverallOutcome
+    __typename
+  }
+  parts {
+    ...FeedbackPart
+    __typename
+  }
+  instructions {
+    ...SubmissionInstructions
+    __typename
+  }
+  __typename
+}
+
+query AssignmentFeedback($courseId: ID!, $itemId: ID!) {
+  SubmissionState {
+    queryState(courseId: $courseId, itemId: $itemId) {
+      ... on Submission_QueryStateFailure {
+        ...QueryStateFailure
+        __typename
+      }
+      ... on Submission_SubmissionState {
+        feedback {
+          ...FullFeedback
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+
+fragment OverallOutcome on Submission_OverallOutcome {
+  latestScore
+  highestScore
+  maxScore
+  __typename
+}
+
+fragment SubmissionInstructions on Submission_Instructions {
+  overview {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  reviewCriteria {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  __typename
+}
+
+fragment QueryStateFailure on Submission_QueryStateFailure {
+  errors {
+    ...SubmissionInvalidAttemptIdError
+    ...SubmissionInvalidHonorlockSessionError
+    ...SubmissionNoAttemptInProgressError
+    ...SubmissionNoOpenDraftError
+    ...SubmissionQueryState_IpNotAllowedError
+    ...SubmissionQueryState_TeamNotAssignedError
+    ...SubmissionReworkSubmission_NoSubmissionToReworkError
+    ...SubmissionSaveResponses_InvalidResponsesError
+    ...SubmissionStaffGradingStartedError
+    ...SubmissionStartAttempt_OutOfAttemptsError
+    __typename
+  }
+  __typename
+}
+
+fragment SubmissionInvalidAttemptIdError on Submission_InvalidAttemptIdError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionInvalidHonorlockSessionError on Submission_InvalidHonorlockSessionError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionNoAttemptInProgressError on Submission_NoAttemptInProgressError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionNoOpenDraftError on Submission_NoOpenDraftError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionQueryState_IpNotAllowedError on Submission_QueryState_IPNotAllowedError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionQueryState_TeamNotAssignedError on Submission_QueryState_TeamNotAssignedError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionReworkSubmission_NoSubmissionToReworkError on Submission_ReworkSubmission_NoSubmissionToReworkError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionSaveResponses_InvalidResponsesError on Submission_SaveResponses_InvalidResponsesError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionStaffGradingStartedError on Submission_StaffGradingStartedError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionStartAttempt_OutOfAttemptsError on Submission_StartAttempt_OutOfAttemptsError {
+  errorCode
+  __typename
+}
+
+fragment SubmissionCmlContent on CmlContent {
+  cmlValue
+  dtdId
+  htmlWithMetadata {
+    html
+    metadata {
+      hasAssetBlock
+      hasCodeBlock
+      hasMath
+      isPlainText
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment SubmissionHtmlContent on Submission_HtmlContent {
+  value
+  __typename
+}
+
+fragment Option on Submission_MultipleChoiceOption {
+  display {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  optionId: id
+  __typename
+}
+
+fragment TextBlock on Submission_TextBlock {
+  partId: id
+  title
+  body {
+    ...SubmissionCmlContent
+    __typename
+  }
+  __typename
+}
+
+fragment BoxViewDocumentAnnotationRubricFeedback on Submission_BoxViewDocumentAnnotationRubricFeedback {
+  fileId
+  id
+  reviewResponseId
+  prompt {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  __typename
+}
+
+fragment MultilineRubricFeedback on Submission_MultilineRubricFeedback {
+  aiSuggestionId
+  id
+  input
+  maxScore
+  prompt {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  score
+  richTextInput {
+    ...SubmissionCmlContent
+    __typename
+  }
+  graderType
+  __typename
+}
+
+fragment RubricOption on Submission_RubricOption {
+  display {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  optionId: id
+  points
+  selected
+  __typename
+}
+
+fragment OptionsRubricFeedback on Submission_OptionsRubricFeedback {
+  aiSuggestionId
+  id
+  options {
+    ...RubricOption
+    __typename
+  }
+  richTextInput {
+    ...SubmissionCmlContent
+    __typename
+  }
+  prompt {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  graderType
+  __typename
+}
+
+fragment GradedOption on Submission_GradedOption {
+  correctlyAnswered
+  display {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  optionId: id
+  feedback {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  __typename
+}
+
+fragment QuestionOutcome on Submission_QuestionOutcome {
+  score
+  maxScore
+  __typename
+}
+
+fragment AutoGradedFeedback on Submission_AutoGradedFeedback {
+  correctness
+  feedback {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  autoGradedFeedbackOutcome: outcome {
+    ...QuestionOutcome
+    __typename
+  }
+  __typename
+}
+
+fragment ManuallyGradedFeedback on Submission_ManuallyGradedFeedback {
+  manuallyGradedFeedbackOutcome: outcome {
+    ...QuestionOutcome
+    __typename
+  }
+  rubrics {
+    ...RubricFeedback
+    __typename
+  }
+  graderType
+  __typename
+}
+
+fragment GradedCheckboxQuestion on Submission_GradedCheckboxQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    options {
+      ...GradedOption
+      __typename
+    }
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  checkboxResponse: response {
+    chosen
+    __typename
+  }
+  __typename
+}
+
+fragment GradedCheckboxReflectQuestion on Submission_GradedCheckboxReflectQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    options {
+      ...GradedOption
+      __typename
+    }
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  checkboxReflectResponse: response {
+    chosen
+    __typename
+  }
+  __typename
+}
+
+fragment GradedCodeExpressionQuestion on Submission_GradedCodeExpressionQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    codeLanguage
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    replEvaluatorId
+    starterCode {
+      code
+      __typename
+    }
+    __typename
+  }
+  codeExpressionResponse: response {
+    answer {
+      code
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment GradedFileUploadQuestion on Submission_GradedFileUploadQuestion {
+  feedback {
+    ...ManuallyGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    plagiarismCheckStatus
+    allowedFiles
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  fileUploadResponse: response {
+    caption
+    fileUrl
+    title
+    __typename
+  }
+  __typename
+}
+
+fragment GradedMathQuestion on Submission_GradedMathQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    correctAnswer {
+      id
+      __typename
+    }
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  mathResponse: response {
+    answer
+    __typename
+  }
+  __typename
+}
+
+fragment GradedMultipleChoiceQuestion on Submission_GradedMultipleChoiceQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    options {
+      ...Option
+      __typename
+    }
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  multipleChoiceResponse: response {
+    chosen
+    __typename
+  }
+  __typename
+}
+
+fragment GradedMultipleChoiceReflectQuestion on Submission_GradedMultipleChoiceReflectQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    options {
+      ...Option
+      __typename
+    }
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  multipleChoiceReflectResponse: response {
+    chosen
+    __typename
+  }
+  __typename
+}
+
+fragment GradedMultipleChoiceFillableBlank on Submission_GradedMultipleChoiceFillableBlank {
+  fillableBlankId: id
+  isCorrect
+  answerOptions {
+    ...Option
+    __typename
+  }
+  feedback {
+    ...SubmissionCmlContent
+    ...SubmissionHtmlContent
+    __typename
+  }
+  __typename
+}
+
+fragment GradedMultipleFillableBlanksQuestion on Submission_GradedMultipleFillableBlanksQuestion {
+  partId: id
+  questionSchema {
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    fillableBlanks {
+      ...GradedMultipleChoiceFillableBlank
+      __typename
+    }
+    __typename
+  }
+  multipleFillableBlanksResponse: response {
+    responses {
+      ... on Submission_MultipleChoiceFillableBlankResponse {
+        responseId: id
+        optionId
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  __typename
+}
+
+fragment GradedNumericQuestion on Submission_GradedNumericQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  numericResponse: response {
+    answer
+    __typename
+  }
+  __typename
+}
+
+fragment GradedOffPlatformQuestion on Submission_GradedOffPlatformQuestion {
+  feedback {
+    ...ManuallyGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment GradedPlainTextQuestion on Submission_GradedPlainTextQuestion {
+  feedback {
+    ...ManuallyGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  plainTextResponse: response {
+    plainText
+    __typename
+  }
+  __typename
+}
+
+fragment GradedRegexQuestion on Submission_GradedRegexQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  regexResponse: response {
+    answer
+    __typename
+  }
+  __typename
+}
+
+fragment GradedRichTextQuestion on Submission_GradedRichTextQuestion {
+  feedback {
+    ...ManuallyGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    plagiarismCheckStatus
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  richTextResponse: response {
+    richText {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  __typename
+}
+
+fragment GradedTextExactMatchQuestion on Submission_GradedTextExactMatchQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    correctAnswers {
+      answer
+      id
+      __typename
+    }
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  textExactMatchResponse: response {
+    answer
+    __typename
+  }
+  __typename
+}
+
+fragment GradedTextReflectQuestion on Submission_GradedTextReflectQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  textReflectResponse: response {
+    answer
+    __typename
+  }
+  __typename
+}
+
+fragment GradedUrlQuestion on Submission_GradedUrlQuestion {
+  feedback {
+    ...ManuallyGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    plagiarismCheckStatus
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    __typename
+  }
+  urlResponse: response {
+    caption
+    title
+    url
+    __typename
+  }
+  __typename
+}
+
+fragment GradedWidgetQuestion on Submission_GradedWidgetQuestion {
+  feedback {
+    ...AutoGradedFeedback
+    __typename
+  }
+  partId: id
+  questionSchema {
+    prompt {
+      ...SubmissionCmlContent
+      ...SubmissionHtmlContent
+      __typename
+    }
+    widgetSessionId
+    __typename
+  }
+  widgetResponse: response {
+    answer
+    __typename
+  }
+  __typename
+}
+
+fragment RubricFeedback on Submission_RubricFeedback {
+  ...BoxViewDocumentAnnotationRubricFeedback
+  ...MultilineRubricFeedback
+  ...OptionsRubricFeedback
+  __typename
+}
+
+fragment FeedbackPart on Submission_FeedbackPart {
+  ...GradedCheckboxQuestion
+  ...GradedCheckboxReflectQuestion
+  ...GradedCodeExpressionQuestion
+  ...GradedFileUploadQuestion
+  ...GradedMathQuestion
+  ...GradedMultipleChoiceQuestion
+  ...GradedMultipleChoiceReflectQuestion
+  ...GradedMultipleFillableBlanksQuestion
+  ...GradedNumericQuestion
+  ...GradedOffPlatformQuestion
+  ...GradedPlainTextQuestion
+  ...GradedRegexQuestion
+  ...GradedRichTextQuestion
+  ...GradedTextExactMatchQuestion
+  ...GradedTextReflectQuestion
+  ...GradedUrlQuestion
+  ...GradedWidgetQuestion
+  ...TextBlock
+  __typename
 }
 """

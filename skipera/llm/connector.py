@@ -1,11 +1,11 @@
 import json
 import requests
 from ..config import (PERPLEXITY_API_URL, PERPLEXITY_API_KEY,
-                      PERPLEXITY_MODEL, GEMINI_API_KEY, GEMINI_MODEL, SYSTEM_PROMPT)
+                      PERPLEXITY_MODEL, GEMINI_API_KEY, GEMINI_MODEL)
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from typing import List, Literal
+from typing import Any, List, Literal
 from loguru import logger
 
 
@@ -19,52 +19,83 @@ class ResponseList(BaseModel):
     responses: List[ResponseFormat]
 
 
+DEFAULT_RESPONSE_SCHEMA = ResponseList.model_json_schema()
+
+
 class PerplexityConnector(object):
     def __init__(self):
         self.API_URL: str = PERPLEXITY_API_URL
         self.API_KEY: str = PERPLEXITY_API_KEY
 
-    def get_response(self, questions: dict) -> dict:
+    def get_response(
+            self,
+            prompt: dict | str,
+            system_prompt: str,
+            response_schema: dict[str, Any] | None = None
+    ) -> dict | str:
         """
-        Sends the questions to Perplexity and asks for the answers
-        in a JSON format.
+        Sends a prompt to Perplexity and optionally asks for a JSON schema response.
         """
         logger.debug("Making an API Request to Perplexity..")
-        response = requests.post(url=self.API_URL, headers={
-            "Authorization": f"Bearer {self.API_KEY}"
-        }, json={
+        payload = {
             "model": PERPLEXITY_MODEL,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(questions)},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(
+                    prompt) if isinstance(prompt, dict) else prompt},
             ],
-            "response_format": {
+        }
+        if response_schema is not None:
+            payload["response_format"] = {
                 "type": "json_schema",
-                "json_schema": {"schema": ResponseList.model_json_schema()}
+                "json_schema": {"schema": response_schema}
             }
-        }).json()
 
-        return json.loads(response["choices"][0]["message"]["content"])
+        response = requests.post(url=self.API_URL, headers={
+            "Authorization": f"Bearer {self.API_KEY}"
+        }, json=payload).json()
+
+        content = response["choices"][0]["message"]["content"]
+        if response_schema is not None:
+            return json.loads(content)
+        return content.strip()
 
 
 class GeminiConnector(object):
     def __init__(self):
         self.client = genai.Client(api_key=GEMINI_API_KEY)
 
-    def get_response(self, questions: dict) -> dict:
+    def get_response(
+            self,
+            prompt: dict | str,
+            system_prompt: str,
+            response_schema: dict[str, Any] | None = None
+    ) -> dict | str:
         """
-        Sends the questions to Gemini and asks for the answers
-        in a JSON format.
+        Sends a prompt to Gemini and optionally asks for a JSON schema response.
         """
         logger.debug("Making an API request to Gemini...")
+        config_args = {
+            "system_instruction": system_prompt,
+            "thinking_config": types.ThinkingConfig(
+                thinking_level="MINIMAL",
+            ),
+        }
+        if response_schema is not None:
+            config_args["response_schema"] = response_schema
+
+        config = types.GenerateContentConfig(
+            **config_args
+        )
+
         response = self.client.models.generate_content(
             model=GEMINI_MODEL,
-            contents=json.dumps(questions),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_schema=ResponseList.model_json_schema()
-            )
+            contents=json.dumps(prompt) if isinstance(
+                prompt, dict) else prompt,
+            config=config
         )
 
         raw_text = response.candidates[0].content.parts[0].text
-        return json.loads(raw_text)
+        if response_schema is not None:
+            return json.loads(raw_text)
+        return raw_text.strip()

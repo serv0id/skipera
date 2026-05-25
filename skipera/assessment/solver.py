@@ -1,14 +1,35 @@
 import time
+import os
+import json
+from datetime import datetime, timezone
 
 import requests
 
 from .. import config
 from .types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model, WHITELISTED_QUESTION_TYPES
-from ..config import GRAPHQL_URL
+from ..config import GRAPHQL_URL, CONFIG_DIR
 from .queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
-                      GRADING_STATUS_QUERY, INITIATE_ATTEMPT_QUERY)
+                      INITIATE_ATTEMPT_QUERY, ASSIGNMENT_FEEDBACK_QUERY)
 from loguru import logger
-from ..llm.connector import PerplexityConnector, GeminiConnector
+from ..llm.connector import DEFAULT_RESPONSE_SCHEMA, PerplexityConnector, GeminiConnector
+from ..session_utils import get_csrf_headers, random_delay
+
+
+SYSTEM_PROMPT = (
+    "Answer the provided questions. Be precise and concise. "
+    "The questions are in a dict format with the key representing the question id "
+    "and the value a JSON dict containing the question, options, type, "
+    "and optionally 'previous_attempts'. "
+    "Questions may have single-choice or multiple-choice answers, "
+    "which would be specified by the 'Type' field. "
+    "The question/option values might have HTML data but ignore that. "
+    "IMPORTANT: If a question has 'previous_attempts', each entry records a per-option "
+    "grader result from prior submissions, with 'response' (the option_id(s)) and "
+    "'correctness' (CORRECT or INCORRECT). "
+    "For options marked INCORRECT: never choose them again. "
+    "For options marked CORRECT: you MUST include them in your answer (for Multi-Choice) "
+    "or pick that exact option (for Single-Choice)."
+)
 
 
 class GradedSolver(object):
@@ -20,57 +41,224 @@ class GradedSolver(object):
         self.draft_id = None
         self.discarded_questions = []
 
-    def solve(self) -> None:
-        state = self.get_state()
+        self.data_dir = CONFIG_DIR / "gradedData"
+        os.makedirs(self.data_dir, exist_ok=True)
 
-        if state["allowedAction"] == "RESUME_DRAFT":
-            logger.error("An attempt is already in progress, please abort it manually.")
+        self.data_file = os.path.join(
+            self.data_dir, f"{course_id}~{item_id}.json")
+        self.questions_data: dict = self._load_data()
 
-        elif state["allowedAction"] == "START_NEW_ATTEMPT":
-            if state["outcome"] is not None:
-                if state["outcome"]["isPassed"]:
-                    logger.debug("Already passed!")
-                    return
+    def _load_data(self) -> dict:
+        if os.path.exists(self.data_file):
+            with open(self.data_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
 
-            if state["attempts"]["attemptsRemaining"] == 0:
-                logger.error("No more attempts can be made!")
+    def _save_data(self) -> None:
+        with open(self.data_file, "w", encoding="utf-8") as f:
+            json.dump(self.questions_data, f, ensure_ascii=False, indent=4)
+
+    def _get_response_text(self, options: list[dict], response: str | list[str]) -> str | list[str]:
+        if isinstance(response, list):
+            return [opt["value"] for opt in options if opt["option_id"] in response]
+        else:
+            for opt in options:
+                if opt["option_id"] == response:
+                    return opt["value"]
+            return response
+
+    def solve(self) -> bool:
+        # Overwrite minimum passing score
+        target_grade = 0.8
+
+        while True:
+            state = self.get_state()
+
+            if state.get("outcome") and state["outcome"].get("isPassed") and state["outcome"].get("earnedGrade", 0) >= target_grade:
+                logger.success("Already passed with target grade!")
+                return True
+
+            allowed = state["allowedAction"]
+            attempts_remaining = state["attempts"]["attemptsRemaining"]
+
+            if attempts_remaining == 0 or allowed == None:
+                rate_limiter = state.get("attempts", {}).get("rateLimiterConfig") or {}
+                increase_at = rate_limiter.get("attemptsRemainingIncreasesAt")
+                retry_msg = ""
+                if increase_at:
+                    try:
+                        dt_target = datetime.fromisoformat(increase_at.replace("Z", "+00:00"))
+                        dt_now = datetime.now(timezone.utc)
+                        delta = dt_target - dt_now
+                        if delta.total_seconds() > 0:
+                            hours = delta.days * 24 + delta.seconds // 3600
+                            minutes = (delta.seconds % 3600) // 60
+                            time_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+                            retry_msg = f" (Retry in {time_str})"
+                        else:
+                            retry_msg = " (Retry available now)"
+                    except Exception:
+                        retry_msg = f" (Retry from {increase_at})"
+
+                if state.get("outcome") and state["outcome"].get("isPassed"):
+                    logger.warning(f"Passed, but below target grade.{retry_msg}")
+                    return True
+                else:
+                    logger.warning(f"No more attempts remaining!{retry_msg}")
+                    return False
+
+            if allowed == "START_NEW_ATTEMPT":
+                if not self.initiate_attempt():
+                    logger.error(
+                        "Could not start an attempt. Please file an issue.")
+                    return False
+                continue
+
+            elif allowed == "RESUME_DRAFT":
+                logger.info("Resuming existing draft.")
 
             else:
-                if not self.initiate_attempt():
-                    logger.error("Could not start an attempt. Please file an issue.")
+                logger.error(f"Unexpected allowedAction: {allowed}")
+                return False
 
+            self.discarded_questions = []
+            questions = self.retrieve_questions(state)
+            self._save_data()
+            questions_for_llm = {}
+            correct_answers = {}
+
+            for part_id, q in questions.items():
+                options = q.get("Options", [])
+                history = q.get("history", [])
+                is_single = q["Type"] == "Single-Choice"
+
+                known = {}
+                for entry in history:
+                    for val, info in entry.get("options", {}).items():
+                        if info.get("correct") is not None:
+                            known.setdefault(val, {})["correct"] = info["correct"]
+                        if info.get("hint"):
+                            known.setdefault(val, {})["hint"] = info["hint"]
+
+                known_correct_id = None
+                if is_single:
+                    for opt in options:
+                        k = known.get(opt["value"], {})
+                        if k.get("correct") is True:
+                            known_correct_id = opt["option_id"]
+                            break
+
+                all_options_known = False
+                known_correct_checkbox_ids = []
+                if not is_single:
+                    all_options_known = all(opt["value"] in known for opt in options)
+                    if all_options_known:
+                        known_correct_checkbox_ids = [
+                            opt["option_id"] for opt in options
+                            if known.get(opt["value"], {}).get("correct") is True
+                        ]
+
+                if is_single and known_correct_id:
+                    correct_answers[part_id] = known_correct_id
+                elif not is_single and all_options_known:
+                    correct_answers[part_id] = known_correct_checkbox_ids
                 else:
-                    if config.PERPLEXITY_API_KEY:
-                        connector = PerplexityConnector()
-                    elif config.GEMINI_API_KEY:
-                        connector = GeminiConnector()
-                    else:
-                        raise RuntimeError("No API Key specified.")
+                    questions_for_llm[part_id] = {
+                        "Question": q["Question"],
+                        "Options": q["Options"],
+                        "Type": q["Type"],
+                    }
 
-                    questions = self.retrieve_questions()
-                    answers = connector.get_response(questions)
+                    virtual_feedbacks = []
+                    for opt in options:
+                        k = known.get(opt["value"], {})
+                        correctness = k.get("correct")
+                        if correctness is None:
+                            continue
+                        virtual_feedbacks.append({
+                            "response": opt["option_id"] if is_single else [opt["option_id"]],
+                            "correctness": "CORRECT" if correctness else "INCORRECT"
+                        })
 
-                    if not self.save_responses(answers["responses"]):
-                        logger.error("Could not save responses. Please file an issue.")
+                    if virtual_feedbacks:
+                        questions_for_llm[part_id]["previous_attempts"] = virtual_feedbacks
 
-                    else:
-                        if not self.submit_draft():
-                            logger.error("Could not submit the assignment. Please file an issue.")
+            if questions_for_llm:
+                if config.PERPLEXITY_API_KEY:
+                    connector = PerplexityConnector()
+                elif config.GEMINI_API_KEY:
+                    connector = GeminiConnector()
+                else:
+                    raise RuntimeError("No API Key specified.")
 
-                        else:
-                            logger.debug("Waiting 3 seconds for grading..")
-                            time.sleep(3)  # delay for grading process
-                            if not self.get_grade():
-                                logger.error("Sorry! Could not pass the assignment, maybe use a better model.")
+                llm_result = connector.get_response(
+                    questions_for_llm, system_prompt=SYSTEM_PROMPT, response_schema=DEFAULT_RESPONSE_SCHEMA)
+                llm_answers = llm_result["responses"]
+            else:
+                llm_answers = []
+                logger.info(
+                    "All questions already correct — resubmitting same answers.")
 
-        else:
-            logger.error("Something went wrong! Please file an issue.")
+            answer_responses = []
+            for answer in llm_answers:
+                answer_responses.append({
+                    "questionId": answer["question_id"],
+                    "questionType": "MULTIPLE_CHOICE" if answer["type"] == "Single" else "CHECKBOX",
+                    "questionResponse": {
+                        "multipleChoiceResponse" if answer["type"] == "Single" else "checkboxResponse": {
+                            "chosen": answer["option_id"][0] if answer["type"] == "Single" else answer["option_id"]
+                        }
+                    }
+                })
+
+            for part_id, response in correct_answers.items():
+                q = questions[part_id]
+                is_single = q["Type"] == "Single-Choice"
+                answer_responses.append({
+                    "questionId": part_id,
+                    "questionType": "MULTIPLE_CHOICE" if is_single else "CHECKBOX",
+                    "questionResponse": {
+                        "multipleChoiceResponse" if is_single else "checkboxResponse": {
+                            "chosen": response
+                        }
+                    }
+                })
+
+            if not self.save_responses(answer_responses):
+                logger.error("Could not save responses. Please file an issue.")
+                return False
+            if not self.submit_draft():
+                logger.error(
+                    "Could not submit the assignment. Please file an issue.")
+                return False
+
+            time.sleep(5.0)
+            feedback_result = self.get_feedback()
+            if feedback_result:
+                outcome = feedback_result["outcome"]
+                latest_score = outcome.get("latestScore", 0)
+                max_score = outcome.get("maxScore", 1)
+                earned_grade = latest_score / max_score if max_score else 0
+
+                self._update_data_from_feedback(
+                    feedback_result["parts"], answer_responses)
+                self._save_data()
+
+                logger.info(
+                    f"Earned grade: {earned_grade:.1%} | Target grade: {target_grade:.1%}"
+                )
+
+                if earned_grade >= target_grade:
+                    logger.success("Passed!")
+                    return True
+
+            random_delay()
 
     def get_state(self) -> dict:
         """
         Retrieves the current state of the assessment.
         """
-        res = self.session.post(url=GRAPHQL_URL, params={
+        res = self.session.post(url=GRAPHQL_URL, headers=get_csrf_headers(self.session), params={
             "opname": "QueryState"
         }, json={
             "operationName": "QueryState",
@@ -87,7 +275,7 @@ class GradedSolver(object):
         """
         Initiates a new attempt for the assessment.
         """
-        res = self.session.post(url=GRAPHQL_URL, params={
+        res = self.session.post(url=GRAPHQL_URL, headers=get_csrf_headers(self.session), params={
             "opname": "Submission_StartAttempt"
         }, json={
             "operationName": "Submission_StartAttempt",
@@ -98,25 +286,23 @@ class GradedSolver(object):
             "query": INITIATE_ATTEMPT_QUERY
         })
 
-        if "Submission_StartAttemptSuccess" in res.text:
-            return True
-        return False
+        return "Submission_StartAttemptSuccess" in res.text
 
-    def retrieve_questions(self) -> dict:
+    def retrieve_questions(self, state: dict) -> dict:
         """
-        Retrieves the questions for the particular attempt
-        which are to be sent to the LLM Connector.
+        Retrieves the questions from the in-progress draft and merges
+        with persisted data. Returns the whitelisted questions dict.
         """
-        state = self.get_state()
         draft = state["attempts"]["inProgressAttempt"]
 
-        self.draft_id = draft["id"]
-        self.attempt_id = draft["draft"]["id"]
+        self.attempt_id = draft["id"]
+        self.draft_id = draft["draft"]["id"]
         questions = draft["draft"]["parts"]
         questions_formatted = {}
 
         for question in questions:
-            if not question["__typename"] in QUESTION_TYPE_MAP:  # discard unknown question types
+            # discard unknown question types
+            if not question["__typename"] in QUESTION_TYPE_MAP:
                 continue
 
             if not question["__typename"] in WHITELISTED_QUESTION_TYPES:
@@ -137,31 +323,29 @@ class GradedSolver(object):
                     "value": option["display"]["cmlValue"]
                 })
 
-            questions_formatted[question["partId"]] = {"Question": question["questionSchema"]["prompt"]["cmlValue"],
-                                                       "Options": options,
-                                                       "Type": "Single-Choice" if
-                                                       question["__typename"] == "Submission_MultipleChoiceQuestion"
-                                                       else "Multi-Choice"}
+            part_id = question["partId"]
+
+            existing = self.questions_data.get(part_id, {})
+            existing_history = existing.get("history", [])
+
+            questions_formatted[part_id] = {
+                "Question": question["questionSchema"]["prompt"]["cmlValue"],
+                "Options": options,
+                "Type": "Single-Choice" if
+                question["__typename"] == "Submission_MultipleChoiceQuestion"
+                else "Multi-Choice",
+                "history": existing_history
+            }
+
+        self.questions_data.update(questions_formatted)
+
         return questions_formatted
 
-    def save_responses(self, answers: dict) -> bool:
+    def save_responses(self, answers: list) -> bool:
         """
         Saves the responses for the assessment to the draft.
         """
-        answer_responses = []
-
-        for answer in answers:
-            answer_responses.append({
-                "questionId": answer["question_id"],
-                "questionType": "MULTIPLE_CHOICE" if answer["type"] == "Single" else "CHECKBOX",
-                "questionResponse": {
-                    "multipleChoiceResponse" if answer["type"] == "Single" else "checkboxResponse": {
-                        "chosen": answer["option_id"][0] if answer["type"] == "Single" else answer["option_id"]
-                    }
-                }
-            })
-
-        res = self.session.post(url=GRAPHQL_URL, params={
+        res = self.session.post(url=GRAPHQL_URL, headers=get_csrf_headers(self.session), params={
             "opname": "Submission_SaveResponses"
         }, json={
             "operationName": "Submission_SaveResponses",
@@ -169,17 +353,24 @@ class GradedSolver(object):
                 "input": {
                     "courseId": self.course_id,
                     "itemId": self.item_id,
-                    "attemptId": self.draft_id,
-                    "questionResponses": [*answer_responses, *self.discarded_questions]
+                    "attemptId": self.attempt_id,
+                    "questionResponses": [*answers, *self.discarded_questions]
                 }
             },
             "query": SAVE_RESPONSES_QUERY
         })
 
         if "Submission_SaveResponsesSuccess" in res.text:
+            try:
+                data = res.json()
+                self.draft_id = (data["data"]["Submission_SaveResponses"]
+                                 ["submissionState"]["attempts"]
+                                 ["inProgressAttempt"]["draft"]["id"])
+            except (KeyError, TypeError):
+                pass
             return True
 
-        logger.debug([*answer_responses, *self.discarded_questions])
+        logger.debug([*answers, *self.discarded_questions])
         logger.debug(res.json())
         return False
 
@@ -187,7 +378,7 @@ class GradedSolver(object):
         """
         Submits the draft for evaluation after the submission is saved.
         """
-        res = self.session.post(url=GRAPHQL_URL, params={
+        res = self.session.post(url=GRAPHQL_URL, headers=get_csrf_headers(self.session), params={
             "opname": "Submission_SubmitLatestDraft"
         }, json={
             "operationName": "Submission_SubmitLatestDraft",
@@ -196,36 +387,124 @@ class GradedSolver(object):
                 "input": {
                     "courseId": self.course_id,
                     "itemId": self.item_id,
-                    "submissionId": self.attempt_id
+                    "submissionId": self.draft_id
                 }
             }
         })
 
-        if "Submission_SubmitLatestDraftSuccess" in res.text:
-            return True
-        return False
+        return "Submission_SubmitLatestDraftSuccess" in res.text
 
-    def get_grade(self) -> bool:
+    def get_feedback(self, max_retries: int = 3, interval: float = 3.0) -> dict | None:
         """
-        Retrieves the outcome for the submitted assignment.
+        Fetches AssignmentFeedback for per-question correctness.
         """
-        res = self.session.post(url=GRAPHQL_URL, params={
-            "opname": "QueryState"
-        }, json={
-            "operationName": "QueryState",
-            "query": GET_STATE_QUERY,
-            "variables": {
-                "courseId": self.course_id,
-                "itemId": self.item_id
+        for i in range(max_retries):
+            res = self.session.post(url=GRAPHQL_URL, headers=get_csrf_headers(self.session), params={
+                "opname": "AssignmentFeedback"
+            }, json={
+                "operationName": "AssignmentFeedback",
+                "variables": {
+                    "courseId": self.course_id,
+                    "itemId": self.item_id
+                },
+                "query": ASSIGNMENT_FEEDBACK_QUERY
+            }).json()
+
+            try:
+                feedback = res["data"]["SubmissionState"]["queryState"]["feedback"]
+            except (KeyError, TypeError):
+                logger.debug(f"Unexpected feedback response: {res}")
+                return None
+
+            if feedback is not None:
+                parts = feedback.get("parts")
+                if parts is not None and all(part.get("feedback") is not None for part in parts):
+                    return feedback
+
+            logger.warning(
+                f"Feedback not ready yet (attempt {i + 1}/{max_retries})")
+            time.sleep(interval)
+
+        logger.warning("Feedback did not become available in time.")
+        return None
+
+    def _update_data_from_feedback(self, feedback_parts: list,
+                                   submitted_responses: list) -> None:
+        """
+        Append a history entry per question from Coursera feedback.
+        """
+        question_lookup = {}
+        for part_id in self.questions_data:
+            key = part_id.split("~")[-1]
+            question_lookup[key] = part_id
+
+        response_lookup = {}
+        for resp in submitted_responses:
+            qr = resp.get("questionResponse", {})
+            chosen = None
+            for key in ("multipleChoiceResponse", "checkboxResponse"):
+                if key in qr:
+                    chosen = qr[key].get("chosen")
+                    break
+            response_lookup[resp["questionId"]] = chosen
+
+        for part in feedback_parts:
+            feedback_part_id = part.get("partId", "")
+            feedback_key = feedback_part_id.split("~")[-1]
+
+            our_part_id = question_lookup.get(feedback_key)
+            if not our_part_id:
+                continue
+
+            fb = part.get("feedback", {})
+            correctness = fb.get("correctness")
+            outcome = fb.get("autoGradedFeedbackOutcome", {})
+            submitted_chosen = response_lookup.get(our_part_id)
+            our_q = self.questions_data[our_part_id]
+            all_options = our_q.get("Options", [])
+            is_single = our_q["Type"] == "Single-Choice"
+
+            chosen_texts = set()
+            if submitted_chosen:
+                texts = self._get_response_text(all_options, submitted_chosen)
+                chosen_texts = {texts} if isinstance(texts, str) else set(texts)
+
+            options_info = {}
+            schema_options = (part.get("questionSchema") or {}).get("options") or []
+            if not schema_options:
+                # Feedback part has no per-option schema (numeric, text-match,
+                # regex, code, file-upload, etc.). Nothing per-option to record.
+                continue
+
+            for opt in schema_options:
+                val = opt["display"].get("cmlValue")
+                if not val:
+                    continue
+                entry = {"chosen": val in chosen_texts}
+                if "correctlyAnswered" in opt:
+                    entry["correct"] = opt["correctlyAnswered"]
+                opt_fb = (opt.get("feedback") or {}).get("cmlValue")
+                if opt_fb:
+                    entry["hint"] = opt_fb
+                options_info[val] = entry
+
+            if is_single and chosen_texts:
+                chosen_text = next(iter(chosen_texts))
+                if correctness == "CORRECT":
+                    for opt in all_options:
+                        options_info.setdefault(opt["value"], {})["chosen"] = opt["value"] == chosen_text
+                        options_info[opt["value"]]["correct"] = (opt["value"] == chosen_text)
+                elif correctness == "INCORRECT":
+                    options_info.setdefault(chosen_text, {})["chosen"] = True
+                    options_info[chosen_text]["correct"] = False
+
+                part_hint = (fb.get("feedback") or {}).get("cmlValue")
+                if part_hint:
+                    options_info.setdefault(chosen_text, {})["hint"] = part_hint
+
+            history_entry = {
+                "score": outcome.get("score"),
+                "maxScore": outcome.get("maxScore"),
+                "options": options_info,
             }
-        }).json()
-
-        outcome = res["data"]["SubmissionState"]["queryState"]["outcome"]
-
-        if outcome is not None:
-            logger.debug(f"Achieved {outcome['earnedGrade']} grade. Passed? {outcome['isPassed']}")
-        else:
-            logger.debug("Outcome is None - check upstream logic")
-            return False
-
-        return outcome['isPassed']
+            our_q.setdefault("history", []).append(history_entry)

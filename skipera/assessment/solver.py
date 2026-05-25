@@ -66,7 +66,7 @@ class GradedSolver(object):
                     return opt["value"]
             return response
 
-    def solve(self) -> None:
+    def solve(self) -> bool:
         # Overwrite minimum passing score
         target_grade = 0.8
 

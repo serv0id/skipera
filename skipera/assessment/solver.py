@@ -470,7 +470,11 @@ class GradedSolver(object):
                 chosen_texts = {texts} if isinstance(texts, str) else set(texts)
 
             options_info = {}
-            schema_options = part["questionSchema"]["options"]
+            schema_options = (part.get("questionSchema") or {}).get("options") or []
+            if not schema_options:
+                # Feedback part has no per-option schema (numeric, text-match,
+                # regex, code, file-upload, etc.). Nothing per-option to record.
+                continue
 
             for opt in schema_options:
                 val = opt["display"].get("cmlValue")

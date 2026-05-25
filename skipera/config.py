@@ -4,7 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 
-CONFIG_DIR = Path.cwd() / ".skipera"
+CONFIG_DIR = Path.home() / ".skipera"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULT_CONFIG = {

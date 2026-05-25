@@ -1,5 +1,5 @@
 import click
-import requests
+import httpx
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config import fetch_browser_cookies, CONFIG_FILE, DEFAULT_CONFIG, BASE_URL, HEADERS, COOKIES
 import json
@@ -16,7 +16,7 @@ class Skipera(object):
         self.user_id = None
         self.course_id = None
         self.base_url = BASE_URL
-        self.session = requests.Session()
+        self.session = httpx.Client(timeout=60.0, follow_redirects=True)
         self.session.headers.update(HEADERS)
         self.session.cookies.update(COOKIES)
         self.course = course

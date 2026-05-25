@@ -1,7 +1,7 @@
 import random
 import time
 
-import requests
+import httpx
 
 _CSRF_COOKIE_MAP = {
     "CSRF3-Token": "x-csrf3-token",
@@ -10,7 +10,7 @@ _CSRF_COOKIE_MAP = {
 }
 
 
-def get_csrf_headers(session: requests.Session) -> dict[str, str]:
+def get_csrf_headers(session: httpx.Client) -> dict[str, str]:
     """Read CSRF tokens from session cookies and return them as per-request headers."""
     headers = {}
     for cookie_name, header_name in _CSRF_COOKIE_MAP.items():

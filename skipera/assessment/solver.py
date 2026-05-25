@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timezone
 
-import requests
+import httpx
 
 from .. import config
 from .types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model, WHITELISTED_QUESTION_TYPES
@@ -43,8 +43,8 @@ TYPE_LOOKUP = {
 
 
 class GradedSolver(object):
-    def __init__(self, session: requests.Session, course_id: str, item_id: str):
-        self.session: requests.Session = session
+    def __init__(self, session: httpx.Client, course_id: str, item_id: str):
+        self.session: httpx.Client = session
         self.course_id: str = course_id
         self.item_id: str = item_id
         self.attempt_id = None

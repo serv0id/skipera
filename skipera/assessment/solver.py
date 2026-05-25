@@ -7,7 +7,7 @@ import requests
 
 from .. import config
 from .types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model, WHITELISTED_QUESTION_TYPES
-from ..config import GRAPHQL_URL
+from ..config import GRAPHQL_URL, CONFIG_DIR
 from .queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                       INITIATE_ATTEMPT_QUERY, ASSIGNMENT_FEEDBACK_QUERY)
 from loguru import logger
@@ -41,7 +41,7 @@ class GradedSolver(object):
         self.draft_id = None
         self.discarded_questions = []
 
-        self.data_dir = "gradedData"
+        self.data_dir = CONFIG_DIR / "gradedData"
         os.makedirs(self.data_dir, exist_ok=True)
 
         self.data_file = os.path.join(

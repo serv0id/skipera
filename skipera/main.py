@@ -182,7 +182,6 @@ class Skipera(object):
             logger.warning(
                 f"[module:{module_id}] [item:{item_id}] Unknown/skipped item type: {item_type} - skipping.")
 
-        random_delay(2.0, 5.0)
         return success
 
     def get_completed_items(self) -> set[str]:

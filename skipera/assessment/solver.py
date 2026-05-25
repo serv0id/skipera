@@ -23,11 +23,12 @@ SYSTEM_PROMPT = (
     "Questions may have single-choice or multiple-choice answers, "
     "which would be specified by the 'Type' field. "
     "The question/option values might have HTML data but ignore that. "
-    "IMPORTANT: If a question has 'previous_attempts', it means prior answers were wrong. "
-    "Each entry in 'previous_attempts' contains 'response' (the option_id(s) chosen) "
-    "and 'correctness' (CORRECT/INCORRECT). "
-    "You MUST pick a DIFFERENT option from the ones marked INCORRECT. "
-    "Never repeat an answer that was already marked INCORRECT."
+    "IMPORTANT: If a question has 'previous_attempts', each entry records a per-option "
+    "grader result from prior submissions, with 'response' (the option_id(s)) and "
+    "'correctness' (CORRECT or INCORRECT). "
+    "For options marked INCORRECT: never choose them again. "
+    "For options marked CORRECT: you MUST include them in your answer (for Multi-Choice) "
+    "or pick that exact option (for Single-Choice)."
 )
 
 
@@ -171,11 +172,13 @@ class GradedSolver(object):
                     virtual_feedbacks = []
                     for opt in options:
                         k = known.get(opt["value"], {})
-                        if k.get("correct") is False:
-                            virtual_feedbacks.append({
-                                "response": opt["option_id"] if is_single else [opt["option_id"]],
-                                "correctness": "INCORRECT"
-                            })
+                        correctness = k.get("correct")
+                        if correctness is None:
+                            continue
+                        virtual_feedbacks.append({
+                            "response": opt["option_id"] if is_single else [opt["option_id"]],
+                            "correctness": "CORRECT" if correctness else "INCORRECT"
+                        })
 
                     if virtual_feedbacks:
                         questions_for_llm[part_id]["previous_attempts"] = virtual_feedbacks

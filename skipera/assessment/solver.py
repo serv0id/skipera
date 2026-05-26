@@ -182,6 +182,14 @@ class GradedSolver(object):
                         continue
 
                     filtered_options = [opt for opt in options if opt.get("correct") is not False]
+                    if len(filtered_options) == 1:
+                        answer_responses.append(self._format_response(
+                            part_id=part_id,
+                            q_type="MULTIPLE_CHOICE",
+                            chosen=[filtered_options[0]["option_id"]]
+                        ))
+                        continue
+
                     unsolved_questions[part_id] = {
                         "Question": q["Question"],
                         "Options": filtered_options,
@@ -520,7 +528,7 @@ class GradedSolver(object):
                     for our_opt in all_options:
                         if our_opt["value"] == val:
                             if "correctlyAnswered" in opt:
-                                our_opt["correct"] = opt["correctlyAnswered"]
+                                our_opt["correct"] = opt["correctlyAnswered"] == (val in chosen_texts)
 
             if correctness == "CORRECT":
                 for our_opt in all_options:

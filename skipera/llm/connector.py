@@ -5,14 +5,15 @@ from ..config import (PERPLEXITY_API_URL, PERPLEXITY_API_KEY,
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from typing import Any, List, Literal
+from typing import Any, List, Literal, Optional
 from loguru import logger
 
 
 class ResponseFormat(BaseModel):
     question_id: str
-    option_id: List[str]
-    type: Literal["Single", "Multi"]
+    question_type: Literal["MULTIPLE_CHOICE", "CHECKBOX", "TEXT_REFLECT"]
+    chosen: Optional[List[str]] = None
+    answer: Optional[str] = None
 
 
 class ResponseList(BaseModel):

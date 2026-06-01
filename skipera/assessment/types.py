@@ -2,7 +2,15 @@
 from pydantic import BaseModel
 from typing import List, Optional, Any, Literal, get_origin
 
-WHITELISTED_QUESTION_TYPES = ["Submission_CheckboxQuestion", "Submission_MultipleChoiceQuestion"]
+WHITELISTED_QUESTION_TYPES = [
+    "Submission_CheckboxQuestion",
+    "Submission_MultipleChoiceQuestion",
+    "Submission_NumericQuestion",
+    "Submission_PlainTextQuestion",
+    "Submission_TextExactMatchQuestion",
+    "Submission_TextReflectQuestion",
+    "Submission_RegexQuestion",
+]
 
 
 QUESTION_TYPE_MAP = {

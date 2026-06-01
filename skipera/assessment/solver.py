@@ -11,11 +11,11 @@ from ..config import GRAPHQL_URL, CONFIG_DIR
 from .queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                       INITIATE_ATTEMPT_QUERY, ASSIGNMENT_FEEDBACK_QUERY)
 from loguru import logger
-from ..llm.connector import DEFAULT_RESPONSE_SCHEMA, PerplexityConnector, GeminiConnector
+from ..llm.connector import DEFAULT_RESPONSE_SCHEMA, TEXT_RESPONSE_SCHEMA, PerplexityConnector, GeminiConnector, DeepSeekConnector
 from ..session_utils import get_csrf_headers, random_delay
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_FOR_CHOICE = (
     "Answer the provided questions. Be precise and concise. "
     "The questions are in a dict format with the key representing the question id "
     "and the value a JSON dict containing the question, options, type, "
@@ -28,7 +28,21 @@ SYSTEM_PROMPT = (
     "'correctness' (CORRECT or INCORRECT). "
     "For options marked INCORRECT: never choose them again. "
     "For options marked CORRECT: you MUST include them in your answer (for Multi-Choice) "
-    "or pick that exact option (for Single-Choice)."
+    "or pick that exact option (for Single-Choice). Format answer as JSON matching this schema: "
+    "\"responseID\": {\"question_id\": \"<question_id>\", \"type\": \"Single\" or \"Multi\", \"option_id\": [\"<option_id1>\", \"<option_id2>\", ...]}. "
+    "REMEMBER: Answer only contains the raw JSON — no extra text before or after. "
+)
+
+SYSTEM_PROMPT_FOR_TEXT = (
+    "Answer the provided question. Be precise and concise. "
+    "The question is in a dict format with the key representing the question id "
+    "and the value a JSON dict containing the question and optionally 'previous_attempts'. "
+    "The question value might have HTML data but ignore that. "
+    "IMPORTANT: If the question has 'previous_attempts', each entry records a grader result"
+    "from a prior submission. Use any feedback in those attempts to inform your answer. "
+    "Format answer as JSON matching this schema: "
+    "\"responseID\": {\"question_id\": \"<question_id>\", \"answer\": \"<your answer>\"}."
+    "REMEMBER: Answer only contains the raw JSON — no extra text before or after. "
 )
 
 
@@ -125,12 +139,37 @@ class GradedSolver(object):
             questions = self.retrieve_questions(state)
             self._save_data()
             questions_for_llm = {}
+            text_questions_for_llm = {}
             correct_answers = {}
 
             for part_id, q in questions.items():
                 options = q.get("Options", [])
                 history = q.get("history", [])
                 is_single = q["Type"] == "Single-Choice"
+                is_text = q["Type"] in ("Numeric", "Text")
+
+                if is_text:
+                    known_correct_answer = None
+                    previous_attempts = []
+                    for entry in history:
+                        correctness = entry.get("correctness")
+                        if correctness == "CORRECT":
+                            known_correct_answer = entry.get("answer")
+                            break
+                        elif correctness == "INCORRECT":
+                            previous_attempts.append({
+                                "answer": entry.get("answer"),
+                                "hint": entry.get("hint"),
+                            })
+
+                    if known_correct_answer is not None:
+                        correct_answers[part_id] = known_correct_answer
+                    else:
+                        q_data = {"Question": q["Question"]}
+                        if previous_attempts:
+                            q_data["previous_attempts"] = previous_attempts
+                        text_questions_for_llm[part_id] = q_data
+                    continue
 
                 known = {}
                 for entry in history:
@@ -183,24 +222,43 @@ class GradedSolver(object):
                     if virtual_feedbacks:
                         questions_for_llm[part_id]["previous_attempts"] = virtual_feedbacks
 
-            if questions_for_llm:
+            if questions_for_llm or text_questions_for_llm:
                 if config.PERPLEXITY_API_KEY:
                     connector = PerplexityConnector()
                 elif config.GEMINI_API_KEY:
                     connector = GeminiConnector()
+                elif config.DEEPSEEK_API_KEY:
+                    connector = DeepSeekConnector()
                 else:
                     raise RuntimeError("No API Key specified.")
-
-                llm_result = connector.get_response(
-                    questions_for_llm, system_prompt=SYSTEM_PROMPT, response_schema=DEFAULT_RESPONSE_SCHEMA)
-                llm_answers = llm_result["responses"]
+            else:
+                connector = None
+            llm_answers = None
+            if questions_for_llm:
+                while (llm_answers == None):
+                    llm_result = connector.get_response(
+                        questions_for_llm, system_prompt=SYSTEM_PROMPT_FOR_CHOICE, response_schema=DEFAULT_RESPONSE_SCHEMA)
+                    llm_answers = llm_result["responses"]
             else:
                 llm_answers = []
+            
+            text_llm_answers = None
+            if text_questions_for_llm:
+                while(text_llm_answers == None):
+                    text_llm_result = connector.get_response(
+                        text_questions_for_llm, system_prompt=SYSTEM_PROMPT_FOR_TEXT, response_schema=TEXT_RESPONSE_SCHEMA)
+                    text_llm_answers = text_llm_result["responses"]
+            else:
+                text_llm_answers = []
+
+            if not questions_for_llm and not text_questions_for_llm:
                 logger.info(
                     "All questions already correct — resubmitting same answers.")
 
             answer_responses = []
             for answer in llm_answers:
+                if type(answer) == str:
+                    answer = llm_answers[answer]
                 answer_responses.append({
                     "questionId": answer["question_id"],
                     "questionType": "MULTIPLE_CHOICE" if answer["type"] == "Single" else "CHECKBOX",
@@ -211,18 +269,56 @@ class GradedSolver(object):
                     }
                 })
 
-            for part_id, response in correct_answers.items():
+            for answer in text_llm_answers:
+                if type(answer) == str:
+                    answer = text_llm_answers[answer]
+                part_id = answer["question_id"]
                 q = questions[part_id]
-                is_single = q["Type"] == "Single-Choice"
+                typename = q["__typename"]
+                response_field = QUESTION_TYPE_MAP[typename][0]
+                question_type = QUESTION_TYPE_MAP[typename][1]
+                model = MODEL_MAP[typename]
+                blank = deep_blank_model(model)
+                inner_key = list(blank.keys())[0]
                 answer_responses.append({
                     "questionId": part_id,
-                    "questionType": "MULTIPLE_CHOICE" if is_single else "CHECKBOX",
+                    "questionType": question_type,
                     "questionResponse": {
-                        "multipleChoiceResponse" if is_single else "checkboxResponse": {
-                            "chosen": response
+                        response_field: {
+                            inner_key: answer["answer"]
                         }
                     }
                 })
+
+            for part_id, response in correct_answers.items():
+                q = questions[part_id]
+                if q["Type"] in ("Text", "Numeric"):
+                    typename = q["__typename"]
+                    response_field = QUESTION_TYPE_MAP[typename][0]
+                    question_type = QUESTION_TYPE_MAP[typename][1]
+                    model = MODEL_MAP[typename]
+                    blank = deep_blank_model(model)
+                    inner_key = list(blank.keys())[0]
+                    answer_responses.append({
+                        "questionId": part_id,
+                        "questionType": question_type,
+                        "questionResponse": {
+                            response_field: {
+                                inner_key: response
+                            }
+                        }
+                    })
+                else:
+                    is_single = q["Type"] == "Single-Choice"
+                    answer_responses.append({
+                        "questionId": part_id,
+                        "questionType": "MULTIPLE_CHOICE" if is_single else "CHECKBOX",
+                        "questionResponse": {
+                            "multipleChoiceResponse" if is_single else "checkboxResponse": {
+                                "chosen": response
+                            }
+                        }
+                    })
 
             if not self.save_responses(answer_responses):
                 logger.error("Could not save responses. Please file an issue.")
@@ -317,7 +413,7 @@ class GradedSolver(object):
                 continue
 
             options = []
-            for option in question["questionSchema"]["options"]:
+            for option in question["questionSchema"].get("options", []):
                 options.append({
                     "option_id": option["optionId"],
                     "value": option["display"]["cmlValue"]
@@ -331,9 +427,11 @@ class GradedSolver(object):
             questions_formatted[part_id] = {
                 "Question": question["questionSchema"]["prompt"]["cmlValue"],
                 "Options": options,
-                "Type": "Single-Choice" if
-                question["__typename"] == "Submission_MultipleChoiceQuestion"
-                else "Multi-Choice",
+                "Type": "Single-Choice" if question["__typename"] == "Submission_MultipleChoiceQuestion" else
+                        "Numeric" if question["__typename"] == "Submission_NumericQuestion" else
+                        "Multi-Choice" if question["__typename"] == "Submission_CheckboxQuestion" else
+                        "Text",
+                "__typename": question["__typename"],
                 "history": existing_history
             }
 
@@ -472,8 +570,30 @@ class GradedSolver(object):
             options_info = {}
             schema_options = (part.get("questionSchema") or {}).get("options") or []
             if not schema_options:
-                # Feedback part has no per-option schema (numeric, text-match,
-                # regex, code, file-upload, etc.). Nothing per-option to record.
+                # Text question (numeric, text-match, regex, etc.) —
+                # record answer + correctness for learning across attempts.
+                is_text_q = our_q["Type"] in ("Numeric", "Text")
+                if is_text_q and correctness:
+                    typename = our_q.get("__typename")
+                    if typename and typename in QUESTION_TYPE_MAP:
+                        response_field = QUESTION_TYPE_MAP[typename][0]
+                        response_data = part.get(response_field, {}) or {}
+                        model = MODEL_MAP.get(typename)
+                        if model:
+                            inner_key = list(deep_blank_model(model).keys())[0]
+                            submitted_answer = response_data.get(inner_key)
+                        else:
+                            submitted_answer = None
+                    else:
+                        submitted_answer = None
+                    history_entry = {
+                        "score": outcome.get("score"),
+                        "maxScore": outcome.get("maxScore"),
+                        "answer": submitted_answer,
+                        "correctness": correctness,
+                        "hint": (fb.get("feedback") or {}).get("cmlValue"),
+                    }
+                    our_q.setdefault("history", []).append(history_entry)
                 continue
 
             for opt in schema_options:

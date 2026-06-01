@@ -5,7 +5,7 @@ import requests
 from loguru import logger
 
 from .. import config
-from ..llm.connector import GeminiConnector, PerplexityConnector
+from ..llm.connector import GeminiConnector, PerplexityConnector, DeepSeekConnector
 from ..session_utils import get_csrf_headers, random_delay
 
 
@@ -67,11 +67,13 @@ class DiscussionPromptSolver(object):
             logger.error("Could not submit discussion answer.")
             return False
 
-    def get_connector(self) -> PerplexityConnector | GeminiConnector:
+    def get_connector(self) -> PerplexityConnector | GeminiConnector | DeepSeekConnector:
         if config.PERPLEXITY_API_KEY:
             return PerplexityConnector()
         if config.GEMINI_API_KEY:
             return GeminiConnector()
+        if config.DEEPSEEK_API_KEY:
+            return DeepSeekConnector()
         raise RuntimeError("No API Key specified.")
 
     def get_prompt(self) -> dict | None:
@@ -124,7 +126,7 @@ class DiscussionPromptSolver(object):
             "courseForumQuestionId": course_forum_question_id,
         }
 
-    def submit_answer(self, course_forum_question_id: str, value: str, max_retries: int = 3) -> bool:
+    def submit_answer(self, course_forum_question_id: str, value: str, max_retries: int = 1) -> bool:
         if max_retries <= 0:
             logger.error("Max retries reached.")
             return False

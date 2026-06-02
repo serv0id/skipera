@@ -337,13 +337,6 @@ class AssignmentPromptSolver(object):
                     }
                 }
 
-        # ── get draft state (provides createdAt + verifiableId source) ──
-        draft = self._get_draft()
-
-        draft_created_at = None
-        if draft:
-            draft_created_at = draft.get("createdAt")
-
         # ── save draft ──
         body = {
             "submission": {
@@ -364,7 +357,14 @@ class AssignmentPromptSolver(object):
             logger.debug(f"Draft PUT failed ({res.status_code}): {res.text[:500]}")
             return False
         logger.info("Draft saved.")
+        
+        # ── get draft state (provides createdAt) ──
+        draft = self._get_draft()
 
+        draft_created_at = None
+        if draft:
+            draft_created_at = draft.get("createdAt")
+            
         # ── finalize submission ──
         verifiable_id = self._generate_verifiable_id()
 
@@ -377,7 +377,7 @@ class AssignmentPromptSolver(object):
                 "itemId": self.item_id,
                 "draftCreatedAt": draft_created_at,
                 "verifiableId": verifiable_id,
-                "gradingType": "HUMAN",
+                "gradingType": "AI",
             },
         )
 

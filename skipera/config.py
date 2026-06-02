@@ -77,6 +77,7 @@ _config = load_config()
 BASE_URL = "https://www.coursera.org/api/"
 GRAPHQL_URL = "https://www.coursera.org/graphql-gateway"
 PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 DEEPSEEK_API_URL = "https://api.deepseek.com"
 
 # User-configurable

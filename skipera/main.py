@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config import fetch_browser_cookies, CONFIG_FILE, DEFAULT_CONFIG, BASE_URL, HEADERS, COOKIES
 import json
 from loguru import logger
+from .assignment.solver import AssignmentPromptSolver
 from .assessment.solver import GradedSolver
 from .discussion.solver import DiscussionPromptSolver
 from .coach.solver import CoachSolver
@@ -178,6 +179,11 @@ class Skipera(object):
             success = self.ungraded_widget_item(item_id)
         elif item_type == "ungradedLti":
             success = self.ungraded_lti_item(item_id)
+        elif item_type in {"phasedPeer"}:
+            logger.info(
+                f"[module:{module_id}] [item:{item_id}] Solving phased peer assignment.")
+            success = AssignmentPromptSolver(
+                self.session, self.user_id, self.course_id, item_id).solve()
         else:
             logger.warning(
                 f"[module:{module_id}] [item:{item_id}] Unknown/skipped item type: {item_type} - skipping.")
@@ -203,11 +209,18 @@ class Skipera(object):
             return set()
 
         items = elements[0].get("items", {})
-        return {
-            item_id
-            for item_id, progress in items.items()
-            if progress.get("progressState") == "Completed"
-        }
+        
+        
+        item_ids = set()
+        for item_id, progress in items.items():
+            if progress.get("progressState") == "Completed":
+                item_ids.add(item_id)
+            elif progress.get("progressState") == "Started":
+                typeName = progress.get("content").get("typeName")
+                if typeName == "PhasedPeerReviewItemProgress":
+                    if progress.get("content").get("definition").get("submitted") == True:
+                        item_ids.add(item_id)
+        return item_ids
 
     def get_video_metadata(self, item_id: str) -> dict:
         r = self.session.get(self.base_url + f"onDemandLectureVideos.v1/{self.course_id}~{item_id}", params={

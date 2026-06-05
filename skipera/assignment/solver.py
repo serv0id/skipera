@@ -1,6 +1,9 @@
 import uuid
+import tempfile
 from html import escape
 from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import urlparse, parse_qsl
 
 import requests
 from loguru import logger
@@ -8,11 +11,20 @@ from loguru import logger
 from .. import config
 from ..llm.connector import GeminiConnector, PerplexityConnector, DeepSeekConnector
 from ..session_utils import get_csrf_headers
+from .queries import ASSIGNMENT_SUBMIT_QUERY
 
 import datetime
+import hashlib
+import base64
+try:
+    from docx import Document
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+
 
 SYSTEM_PROMPT = (
-    "Write a concise Coursera assignment reply for the provided prompt. "
+    "Write a concisanalysis-for-business-systemse Coursera assignment reply for the provided prompt. "
     "Answer every question directly, use a natural first-person tone, and keep it concrete. "
     "Never return fill-in-the-blank templates, bracketed placeholders. "
     "If the prompt asks for personal details that were not provided, omit those details or answer in a "
@@ -80,7 +92,7 @@ class AssignmentPromptSolver(object):
         "onDemandPeerDisplayablePhaseSchedules.v1(currentPhase,phaseEnds,phaseStarts)"
     )
     PERMISSIONS_INCLUDES = "receivedReviewsProgress,submissionProgress,phaseSchedule"
-
+    
     @property
     def _draft_url(self) -> str:
         return (config.BASE_URL + "onDemandPeerSubmissionDrafts.v1/"
@@ -294,8 +306,75 @@ class AssignmentPromptSolver(object):
         elements = data.get("elements") or []
         return elements[0] if elements else None
 
-    # ── save & submit ────────────────────────────────────────────────
+   # ── submit attachment ────────────────────────────────────────────────
 
+    def find_submission_url(self, filename, content_md5) -> str | None: 
+        res_get_url = self.session.post(
+            config.GRAPHQL_URL,
+            params={
+                "opname":"GetPreSignedUrl"
+            },
+            json={
+                "operationName":"GetPreSignedUrl",
+                "variables":{
+                    "input":{
+                        "contentMd5":content_md5,
+                        "contentType":
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "fileName":filename
+                    }
+                },
+                "query": ASSIGNMENT_SUBMIT_QUERY
+            }
+        )
+        if res_get_url.status_code != 200:
+            logger.debug("Can't get url to subbmit assignment")
+            return None
+        
+        data = res_get_url.json()
+        submission_url_data = data.get("data").get("Submission_FileUploadQuestionGenerateUploadUrl").get("url")
+        submission_url, param = self.split_url(submission_url_data)
+        return submission_url,param
+    
+    def submit_attachment(self, submission_url, params, filepath, content_md5 ,len_data) -> bool:
+        with open(filepath, "rb") as f:
+            data = f.read()
+        submit_session = requests.Session()
+        res_option = submit_session.options(
+            submission_url,
+            params=params,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "content-md5,content-type",
+                "Origin": "https://www.coursera.org"
+            }
+        )
+        if res_option.status_code != 200:
+            logger.error(res_option.text)
+            return False
+        
+        
+        res = submit_session.put(
+            submission_url,
+            params=params,
+            headers={
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+                "Content-Length": len_data,
+                "Content-Md5": content_md5,
+                "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "Origin": "https://www.coursera.org"
+            },
+            data= data
+        )
+        if res.status_code != 200:
+            logger.error(res.text)
+            return False
+        
+        return True
+    
+     # ── save & submit ────────────────────────────────────────────────
+    
     def _save_and_submit(self, prompt: dict, answers: dict[str, str]) -> bool:
         """Save draft via PUT, then finalize submission via POST."""
 
@@ -329,11 +408,35 @@ class AssignmentPromptSolver(object):
 
                     }
                 }
-            else:
+            elif part_type == "plainText":
                 draft_parts[part_id] = {
                     "typeName": "plainText",
                     "definition": {
                         "plainText": answer_text,
+                    }
+                }
+            elif part_type == "fileUpload":
+                filepath = self.save_as_docx(answer_text)
+                filename = Path(filepath).name
+                with open(filepath, "rb") as f:
+                    data = f.read()
+                content_md5 = self.to_md5_base64(data)
+                
+                subimisson_url, params = self.find_submission_url(filename, content_md5)
+                if subimisson_url == None:
+                    return False
+                
+                status = self.submit_attachment(subimisson_url, params, filepath, content_md5, str(len(data)))
+                if status != True:
+                    logger.debug("Submit failed")
+                    return False
+                
+                draft_parts[part_id] = {
+                    "typeName":"fileUpload",
+                    "definition":{
+                        "caption":"",
+                        "fileUrl": subimisson_url,
+                        "title":"My Project"
                     }
                 }
 
@@ -402,6 +505,10 @@ class AssignmentPromptSolver(object):
     # ── helpers ──────────────────────────────────────────────────────
 
     @staticmethod
+    def to_md5_base64(value: bytes) -> str:
+        return base64.b64encode(bytes.fromhex(hashlib.md5(value).hexdigest())).decode()
+    
+    @staticmethod
     def cml_to_text(value: str) -> str:
         parser = CMLTextParser()
         parser.feed(value)
@@ -420,6 +527,41 @@ class AssignmentPromptSolver(object):
         if not lines:
             lines = [answer.strip()]
         return "<div class=\"cmlToHtml-content-container\" style=\"white-space: pre-wrap\">".join(f"<p>{escape(line)}</p>" for line in lines) + "</div>"
+
+    @staticmethod
+    def split_url(url: str) -> tuple[str, dict[str, str]]:
+        """Split a URL into (base_url, params_dict)."""
+        parsed = urlparse(url)
+        base = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        return base, params
+
+    @staticmethod
+    def save_as_docx(answer: str, filepath: str | None = None) -> str:
+        """Save the answer text as a .docx file.
+
+        Returns the path to the created file.
+        """
+        if not HAS_DOCX:
+            raise ImportError(
+                "python-docx is required to save .docx files. "
+                "Install it with: pip install python-docx"
+            )
+
+        if filepath is None:
+            filepath = Path(tempfile.gettempdir()) / "answer.docx"
+
+        doc = Document()
+        for paragraph in answer.splitlines():
+            text = paragraph.strip()
+            if text:
+                doc.add_paragraph(text)
+            else:
+                doc.add_paragraph("")
+
+        doc.save(str(filepath))
+        logger.info(f"Answer saved as docx: {filepath}")
+        return str(filepath)
 
     @staticmethod
     def format_llm_prompt(prompt: dict, part: dict) -> str:

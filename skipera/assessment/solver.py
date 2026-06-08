@@ -16,20 +16,30 @@ from ..session_utils import get_csrf_headers, random_delay
 
 
 SYSTEM_PROMPT = (
-    "Answer the provided questions. Be precise and concise. "
-    "The questions are in a dict format with the key representing the question id "
-    "and the value a JSON dict containing the question, options, type, "
-    "and optionally 'previous_attempts'. "
-    "Questions may have single-choice or multiple-choice answers, "
-    "which would be specified by the 'Type' field. "
-    "The question/option values might have HTML data but ignore that. "
-    "IMPORTANT: If a question has 'previous_attempts', each entry records a per-option "
-    "grader result from prior submissions, with 'response' (the option_id(s)) and "
-    "'correctness' (CORRECT or INCORRECT). "
-    "For options marked INCORRECT: never choose them again. "
-    "For options marked CORRECT: you MUST include them in your answer (for Multi-Choice) "
-    "or pick that exact option (for Single-Choice)."
+    "Answer the provided questions. Be precise and concise.\n"
+    "The questions are in a dict format where each key represents the question id, and the value is a JSON dict containing:\n"
+    "- 'Question': the question text (which might have HTML tags, ignore them).\n"
+    "- 'Options': a list of options (for MULTIPLE_CHOICE and CHECKBOX types) with option_id and value.\n"
+    "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', or 'TEXT_REFLECT'.\n"
+    "- 'previous_attempts': (optional, only for CHECKBOX) past attempt results.\n\n"
+    "Rules for each question type:\n"
+    "1. MULTIPLE_CHOICE: Single-choice question. Select exactly one option_id and place it in the 'chosen' list.\n"
+    "2. CHECKBOX: Multi-choice question. Select one or more option_ids and place them in the 'chosen' list.\n"
+    "3. TEXT_REFLECT: Question with no options. Answer the question prompt thoughtfully and precisely "
+    "matching the question content. The response in the 'answer' field must be a high-quality, relevant response directly answering the prompt.\n\n"
+    "IMPORTANT for CHECKBOX:\n"
+    "If a question has 'previous_attempts', each entry records a prior submission of chosen option_ids:\n"
+    "- 'response' is a list of option_ids that were chosen together.\n"
+    "- 'hint' states that this combination was graded INCORRECT and shows the fractional score earned (e.g. 'Score: 1/3').\n"
+    "Use these partial scores to logically deduce the status of options (e.g., if a combination of size 3 got 2/3 correct, then exactly 2 of those options are correct, and 1 is incorrect). Integrate all attempts to find an untested combination that satisfies these constraints."
 )
+
+
+TYPE_LOOKUP = {
+    "MULTIPLE_CHOICE": ("multipleChoiceResponse", "chosen"),
+    "CHECKBOX": ("checkboxResponse", "chosen"),
+    "TEXT_REFLECT": ("textReflectResponse", "answer")
+}
 
 
 class GradedSolver(object):
@@ -67,6 +77,24 @@ class GradedSolver(object):
                     return opt["value"]
             return response
 
+    def _format_response(self, part_id: str, q_type: str, chosen: list = None, answer: str = None) -> dict:
+        response_key, val_key = TYPE_LOOKUP[q_type]
+        if q_type == "MULTIPLE_CHOICE":
+            val = chosen[0] if chosen else None
+        elif q_type == "CHECKBOX":
+            val = chosen or []
+        else:
+            val = answer or None
+        return {
+            "questionId": part_id,
+            "questionType": q_type,
+            "questionResponse": {
+                response_key: {
+                    val_key: val
+                }
+            }
+        }
+
     def solve(self) -> bool:
         # Overwrite minimum passing score
         target_grade = 0.8
@@ -79,9 +107,18 @@ class GradedSolver(object):
                 return True
 
             allowed = state["allowedAction"]
-            attempts_remaining = state["attempts"]["attemptsRemaining"]
 
-            if attempts_remaining == 0 or allowed == None:
+            if allowed == "START_NEW_ATTEMPT":
+                if not self.initiate_attempt():
+                    logger.error(
+                        "Could not start an attempt. Please file an issue.")
+                    return False
+                continue
+
+            elif allowed == "RESUME_DRAFT":
+                logger.info("Resuming existing draft.")
+
+            elif allowed is None:
                 rate_limiter = state.get("attempts", {}).get("rateLimiterConfig") or {}
                 increase_at = rate_limiter.get("attemptsRemainingIncreasesAt")
                 retry_msg = ""
@@ -107,16 +144,6 @@ class GradedSolver(object):
                     logger.warning(f"No more attempts remaining!{retry_msg}")
                     return False
 
-            if allowed == "START_NEW_ATTEMPT":
-                if not self.initiate_attempt():
-                    logger.error(
-                        "Could not start an attempt. Please file an issue.")
-                    return False
-                continue
-
-            elif allowed == "RESUME_DRAFT":
-                logger.info("Resuming existing draft.")
-
             else:
                 logger.error(f"Unexpected allowedAction: {allowed}")
                 return False
@@ -124,66 +151,93 @@ class GradedSolver(object):
             self.discarded_questions = []
             questions = self.retrieve_questions(state)
             self._save_data()
-            questions_for_llm = {}
-            correct_answers = {}
+            unsolved_questions = {}
+            answer_responses = []
 
             for part_id, q in questions.items():
+                q_type = q["Type"]
                 options = q.get("Options", [])
-                history = q.get("history", [])
-                is_single = q["Type"] == "Single-Choice"
 
-                known = {}
-                for entry in history:
-                    for val, info in entry.get("options", {}).items():
-                        if info.get("correct") is not None:
-                            known.setdefault(val, {})["correct"] = info["correct"]
-                        if info.get("hint"):
-                            known.setdefault(val, {})["hint"] = info["hint"]
+                if q_type == "TEXT_REFLECT":
+                    if q.get("correct_answer"):
+                        answer_responses.append(self._format_response(
+                            part_id=part_id,
+                            q_type="TEXT_REFLECT",
+                            answer=q["correct_answer"]
+                        ))
+                    else:
+                        unsolved_questions[part_id] = {
+                            "Question": q["Question"],
+                            "Options": [],
+                            "Type": "TEXT_REFLECT"
+                        }
+                elif q_type == "MULTIPLE_CHOICE":
+                    known_correct_id = next((opt["option_id"] for opt in options if opt.get("correct") is True), None)
+                    if known_correct_id:
+                        answer_responses.append(self._format_response(
+                            part_id=part_id,
+                            q_type="MULTIPLE_CHOICE",
+                            chosen=[known_correct_id]
+                        ))
+                        continue
 
-                known_correct_id = None
-                if is_single:
-                    for opt in options:
-                        k = known.get(opt["value"], {})
-                        if k.get("correct") is True:
-                            known_correct_id = opt["option_id"]
-                            break
+                    filtered_options = [opt for opt in options if opt.get("correct") is not False]
+                    if len(filtered_options) == 1:
+                        answer_responses.append(self._format_response(
+                            part_id=part_id,
+                            q_type="MULTIPLE_CHOICE",
+                            chosen=[filtered_options[0]["option_id"]]
+                        ))
+                        continue
 
-                all_options_known = False
-                known_correct_checkbox_ids = []
-                if not is_single:
-                    all_options_known = all(opt["value"] in known for opt in options)
-                    if all_options_known:
-                        known_correct_checkbox_ids = [
-                            opt["option_id"] for opt in options
-                            if known.get(opt["value"], {}).get("correct") is True
-                        ]
-
-                if is_single and known_correct_id:
-                    correct_answers[part_id] = known_correct_id
-                elif not is_single and all_options_known:
-                    correct_answers[part_id] = known_correct_checkbox_ids
-                else:
-                    questions_for_llm[part_id] = {
+                    unsolved_questions[part_id] = {
                         "Question": q["Question"],
-                        "Options": q["Options"],
-                        "Type": q["Type"],
+                        "Options": filtered_options,
+                        "Type": "MULTIPLE_CHOICE"
+                    }
+                elif q_type == "CHECKBOX":
+                    all_resolved = all(opt.get("correct") is not None for opt in options)
+                    if all_resolved:
+                        known_correct_checkbox_ids = [opt["option_id"] for opt in options if opt.get("correct") is True]
+                        answer_responses.append(self._format_response(
+                            part_id=part_id,
+                            q_type="CHECKBOX",
+                            chosen=known_correct_checkbox_ids
+                        ))
+                        continue
+
+                    filtered_options = [opt for opt in options if opt.get("correct") is not False]
+                    known_correct_vals = [opt["value"] for opt in filtered_options if opt.get("correct") is True]
+                    question_text = q["Question"]
+                    if known_correct_vals:
+                        question_text += "\n\n(IMPORTANT NOTE: The following options are already known to be CORRECT and MUST be included in your chosen list:\n"
+                        for val in known_correct_vals:
+                            question_text += f"- {val}\n"
+                        question_text += ")"
+
+                    unsolved_questions[part_id] = {
+                        "Question": question_text,
+                        "Options": filtered_options,
+                        "Type": "CHECKBOX"
                     }
 
-                    virtual_feedbacks = []
-                    for opt in options:
-                        k = known.get(opt["value"], {})
-                        correctness = k.get("correct")
-                        if correctness is None:
-                            continue
-                        virtual_feedbacks.append({
-                            "response": opt["option_id"] if is_single else [opt["option_id"]],
-                            "correctness": "CORRECT" if correctness else "INCORRECT"
-                        })
+                    incorrect_combs = q.get("incorrect_combinations", [])
+                    if incorrect_combs:
+                        virtual_feedbacks = []
+                        for comb_entry in incorrect_combs:
+                            comb = comb_entry["combination"]
+                            score_info = f" (Score: {comb_entry.get('score')}/{comb_entry.get('max_score')})"
+                            chosen_ids = [opt["option_id"] for opt in filtered_options if opt["value"] in comb]
+                            if chosen_ids:
+                                virtual_feedbacks.append({
+                                    "response": chosen_ids,
+                                    "correctness": "INCORRECT",
+                                    "hint": f"This combination of options was submitted and graded INCORRECT{score_info}."
+                                })
+                        if virtual_feedbacks:
+                            unsolved_questions[part_id]["previous_attempts"] = virtual_feedbacks
 
-                    if virtual_feedbacks:
-                        questions_for_llm[part_id]["previous_attempts"] = virtual_feedbacks
-
-            if questions_for_llm:
+            if unsolved_questions:
                 if config.PERPLEXITY_API_KEY:
                     connector = PerplexityConnector()
                 elif config.GEMINI_API_KEY:
@@ -192,37 +246,17 @@ class GradedSolver(object):
                     raise RuntimeError("No API Key specified.")
 
                 llm_result = connector.get_response(
-                    questions_for_llm, system_prompt=SYSTEM_PROMPT, response_schema=DEFAULT_RESPONSE_SCHEMA)
-                llm_answers = llm_result["responses"]
+                    unsolved_questions, system_prompt=SYSTEM_PROMPT, response_schema=DEFAULT_RESPONSE_SCHEMA)
+                for ans in llm_result.get("responses", []):
+                    answer_responses.append(self._format_response(
+                        part_id=ans["question_id"],
+                        q_type=unsolved_questions[ans["question_id"]]["Type"], # Don't trust the LLM to echo back question_type
+                        chosen=ans.get("chosen"),
+                        answer=ans.get("answer")
+                    ))
             else:
-                llm_answers = []
                 logger.info(
                     "All questions already correct — resubmitting same answers.")
-
-            answer_responses = []
-            for answer in llm_answers:
-                answer_responses.append({
-                    "questionId": answer["question_id"],
-                    "questionType": "MULTIPLE_CHOICE" if answer["type"] == "Single" else "CHECKBOX",
-                    "questionResponse": {
-                        "multipleChoiceResponse" if answer["type"] == "Single" else "checkboxResponse": {
-                            "chosen": answer["option_id"][0] if answer["type"] == "Single" else answer["option_id"]
-                        }
-                    }
-                })
-
-            for part_id, response in correct_answers.items():
-                q = questions[part_id]
-                is_single = q["Type"] == "Single-Choice"
-                answer_responses.append({
-                    "questionId": part_id,
-                    "questionType": "MULTIPLE_CHOICE" if is_single else "CHECKBOX",
-                    "questionResponse": {
-                        "multipleChoiceResponse" if is_single else "checkboxResponse": {
-                            "chosen": response
-                        }
-                    }
-                })
 
             if not self.save_responses(answer_responses):
                 logger.error("Could not save responses. Please file an issue.")
@@ -316,32 +350,42 @@ class GradedSolver(object):
                 })
                 continue
 
+            part_id = question["partId"]
+            existing = self.questions_data.get(part_id, {})
+            existing_options = existing.get("Options", [])
+
+            existing_correctness = {}
+            for opt in existing_options:
+                if opt.get("correct") is not None:
+                    existing_correctness[opt["value"]] = opt["correct"]
+
             options = []
-            for option in question["questionSchema"]["options"]:
+            options_schema = question["questionSchema"].get("options") or []
+            for option in options_schema:
+                val = option["display"]["cmlValue"]
                 options.append({
                     "option_id": option["optionId"],
-                    "value": option["display"]["cmlValue"]
+                    "value": val,
+                    "correct": existing_correctness.get(val, None)
                 })
-
-            part_id = question["partId"]
-
-            existing = self.questions_data.get(part_id, {})
-            existing_history = existing.get("history", [])
 
             questions_formatted[part_id] = {
                 "Question": question["questionSchema"]["prompt"]["cmlValue"],
                 "Options": options,
-                "Type": "Single-Choice" if
-                question["__typename"] == "Submission_MultipleChoiceQuestion"
-                else "Multi-Choice",
-                "history": existing_history
+                "Type": QUESTION_TYPE_MAP[question["__typename"]][1],
             }
+
+            if "correct_answer" in existing:
+                questions_formatted[part_id]["correct_answer"] = existing["correct_answer"]
+
+            if "incorrect_combinations" in existing:
+                questions_formatted[part_id]["incorrect_combinations"] = existing["incorrect_combinations"]
 
         self.questions_data.update(questions_formatted)
 
         return questions_formatted
 
-    def save_responses(self, answers: list) -> bool:
+    def save_responses(self, answer_responses: list) -> bool:
         """
         Saves the responses for the assessment to the draft.
         """
@@ -354,7 +398,7 @@ class GradedSolver(object):
                     "courseId": self.course_id,
                     "itemId": self.item_id,
                     "attemptId": self.attempt_id,
-                    "questionResponses": [*answers, *self.discarded_questions]
+                    "questionResponses": [*answer_responses, *self.discarded_questions]
                 }
             },
             "query": SAVE_RESPONSES_QUERY
@@ -370,7 +414,7 @@ class GradedSolver(object):
                 pass
             return True
 
-        logger.debug([*answers, *self.discarded_questions])
+        logger.debug([*answer_responses, *self.discarded_questions])
         logger.debug(res.json())
         return False
 
@@ -394,7 +438,7 @@ class GradedSolver(object):
 
         return "Submission_SubmitLatestDraftSuccess" in res.text
 
-    def get_feedback(self, max_retries: int = 3, interval: float = 3.0) -> dict | None:
+    def get_feedback(self, max_retries: int = 3) -> dict | None:
         """
         Fetches AssignmentFeedback for per-question correctness.
         """
@@ -423,7 +467,7 @@ class GradedSolver(object):
 
             logger.warning(
                 f"Feedback not ready yet (attempt {i + 1}/{max_retries})")
-            time.sleep(interval)
+            random_delay()
 
         logger.warning("Feedback did not become available in time.")
         return None
@@ -431,7 +475,7 @@ class GradedSolver(object):
     def _update_data_from_feedback(self, feedback_parts: list,
                                    submitted_responses: list) -> None:
         """
-        Append a history entry per question from Coursera feedback.
+        Update resolved options, correct answers, and incorrect combinations.
         """
         question_lookup = {}
         for part_id in self.questions_data:
@@ -440,13 +484,8 @@ class GradedSolver(object):
 
         response_lookup = {}
         for resp in submitted_responses:
-            qr = resp.get("questionResponse", {})
-            chosen = None
-            for key in ("multipleChoiceResponse", "checkboxResponse"):
-                if key in qr:
-                    chosen = qr[key].get("chosen")
-                    break
-            response_lookup[resp["questionId"]] = chosen
+            response_key, val_key = TYPE_LOOKUP[resp["questionType"]]
+            response_lookup[resp["questionId"]] = resp["questionResponse"][response_key][val_key]
 
         for part in feedback_parts:
             feedback_part_id = part.get("partId", "")
@@ -458,53 +497,56 @@ class GradedSolver(object):
 
             fb = part.get("feedback", {})
             correctness = fb.get("correctness")
-            outcome = fb.get("autoGradedFeedbackOutcome", {})
+            outcome = fb.get("autoGradedFeedbackOutcome") or {}
             submitted_chosen = response_lookup.get(our_part_id)
             our_q = self.questions_data[our_part_id]
+
+            if our_q.get("correct_answer") or (our_q["Type"] == "MULTIPLE_CHOICE" and any(opt.get("correct") is True for opt in our_q.get("Options", []))) or (our_q["Type"] == "CHECKBOX" and not any(opt.get("correct") is None for opt in our_q.get("Options", []))):
+                continue
+
             all_options = our_q.get("Options", [])
-            is_single = our_q["Type"] == "Single-Choice"
+            question_type = our_q["Type"]
+
+            if question_type == "TEXT_REFLECT":
+                if correctness == "CORRECT":
+                    our_q["correct_answer"] = submitted_chosen
+                continue
+
+            is_single = question_type == "MULTIPLE_CHOICE"
 
             chosen_texts = set()
             if submitted_chosen:
                 texts = self._get_response_text(all_options, submitted_chosen)
                 chosen_texts = {texts} if isinstance(texts, str) else set(texts)
 
-            options_info = {}
             schema_options = (part.get("questionSchema") or {}).get("options") or []
-            if not schema_options:
-                # Feedback part has no per-option schema (numeric, text-match,
-                # regex, code, file-upload, etc.). Nothing per-option to record.
-                continue
+            if schema_options:
+                for opt in schema_options:
+                    val = opt["display"].get("cmlValue")
+                    if not val:
+                        continue
+                    for our_opt in all_options:
+                        if our_opt["value"] == val:
+                            if "correctlyAnswered" in opt:
+                                our_opt["correct"] = opt["correctlyAnswered"] == (val in chosen_texts)
 
-            for opt in schema_options:
-                val = opt["display"].get("cmlValue")
-                if not val:
-                    continue
-                entry = {"chosen": val in chosen_texts}
-                if "correctlyAnswered" in opt:
-                    entry["correct"] = opt["correctlyAnswered"]
-                opt_fb = (opt.get("feedback") or {}).get("cmlValue")
-                if opt_fb:
-                    entry["hint"] = opt_fb
-                options_info[val] = entry
-
-            if is_single and chosen_texts:
-                chosen_text = next(iter(chosen_texts))
-                if correctness == "CORRECT":
-                    for opt in all_options:
-                        options_info.setdefault(opt["value"], {})["chosen"] = opt["value"] == chosen_text
-                        options_info[opt["value"]]["correct"] = (opt["value"] == chosen_text)
-                elif correctness == "INCORRECT":
-                    options_info.setdefault(chosen_text, {})["chosen"] = True
-                    options_info[chosen_text]["correct"] = False
-
-                part_hint = (fb.get("feedback") or {}).get("cmlValue")
-                if part_hint:
-                    options_info.setdefault(chosen_text, {})["hint"] = part_hint
-
-            history_entry = {
-                "score": outcome.get("score"),
-                "maxScore": outcome.get("maxScore"),
-                "options": options_info,
-            }
-            our_q.setdefault("history", []).append(history_entry)
+            if correctness == "CORRECT":
+                for our_opt in all_options:
+                    our_opt["correct"] = our_opt["value"] in chosen_texts
+            elif correctness == "INCORRECT":
+                if is_single and chosen_texts:
+                    chosen_text = next(iter(chosen_texts))
+                    for our_opt in all_options:
+                        if our_opt["value"] == chosen_text:
+                            our_opt["correct"] = False
+                            break
+                elif not is_single and chosen_texts:
+                    our_q.setdefault("incorrect_combinations", [])
+                    comb = sorted(list(chosen_texts))
+                    
+                    if not any(existing_comb["combination"] == comb for existing_comb in our_q["incorrect_combinations"]):
+                        our_q["incorrect_combinations"].append({
+                            "combination": comb,
+                            "score": outcome.get("score"),
+                            "max_score": outcome.get("maxScore")
+                        })

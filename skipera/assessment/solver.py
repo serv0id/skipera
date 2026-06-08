@@ -250,7 +250,7 @@ class GradedSolver(object):
                 for ans in llm_result.get("responses", []):
                     answer_responses.append(self._format_response(
                         part_id=ans["question_id"],
-                        q_type=ans["question_type"],
+                        q_type=unsolved_questions[ans["question_id"]]["Type"], # Don't trust the LLM to echo back question_type
                         chosen=ans.get("chosen"),
                         answer=ans.get("answer")
                     ))

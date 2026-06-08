@@ -1,4 +1,3 @@
-# https://github.com/serv0id/skipera
 import httpx
 from loguru import logger
 from .. import config

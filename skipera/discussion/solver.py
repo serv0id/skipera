@@ -1,7 +1,7 @@
 from html import escape
 from html.parser import HTMLParser
 
-import requests
+import httpx
 from loguru import logger
 
 from .. import config
@@ -44,8 +44,8 @@ class CMLTextParser(HTMLParser):
 
 
 class DiscussionPromptSolver(object):
-    def __init__(self, session: requests.Session, user_id: str, course_id: str, item_id: str):
-        self.session: requests.Session = session
+    def __init__(self, session: httpx.Client, user_id: str, course_id: str, item_id: str):
+        self.session: httpx.Client = session
         self.user_id: str = user_id
         self.course_id: str = course_id
         self.item_id: str = item_id

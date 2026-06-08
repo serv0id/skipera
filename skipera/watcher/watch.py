@@ -1,12 +1,11 @@
-# https://github.com/serv0id/skipera
-import requests
+import httpx
 from loguru import logger
 from .. import config
 from ..session_utils import get_csrf_headers, random_delay
 
 
 class Watcher(object):
-    def __init__(self, session: requests.Session, item: dict, metadata: dict, user_id: str, slug: str, course_id: str):
+    def __init__(self, session: httpx.Client, item: dict, metadata: dict, user_id: str, slug: str, course_id: str):
         self.metadata = metadata
         self.session = session
         self.item = item

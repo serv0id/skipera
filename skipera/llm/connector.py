@@ -1,5 +1,5 @@
 import json
-import requests
+import httpx
 from ..config import (PERPLEXITY_API_URL, PERPLEXITY_API_KEY,
                       PERPLEXITY_MODEL, GEMINI_API_KEY, GEMINI_MODEL)
 from google import genai
@@ -52,9 +52,9 @@ class PerplexityConnector(object):
                 "json_schema": {"schema": response_schema}
             }
 
-        response = requests.post(url=self.API_URL, headers={
+        response = httpx.post(url=self.API_URL, headers={
             "Authorization": f"Bearer {self.API_KEY}"
-        }, json=payload).json()
+        }, json=payload, timeout=60.0).json()
 
         content = response["choices"][0]["message"]["content"]
         if response_schema is not None:

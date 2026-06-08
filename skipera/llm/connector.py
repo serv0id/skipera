@@ -79,7 +79,7 @@ class GeminiConnector(object):
         config_args = {
             "system_instruction": system_prompt,
             "thinking_config": types.ThinkingConfig(
-                thinking_level="MINIMAL",
+                thinking_level="low",
             ),
         }
         if response_schema is not None:

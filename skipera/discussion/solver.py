@@ -5,7 +5,7 @@ import httpx
 from loguru import logger
 
 from .. import config
-from ..llm.connector import GeminiConnector, PerplexityConnector
+from ..llm.connector import GeminiConnector, PerplexityConnector, OpenAIConnector, NvidiaConnector, AnthropicConnector
 from ..session_utils import get_csrf_headers, random_delay
 
 
@@ -67,9 +67,15 @@ class DiscussionPromptSolver(object):
             logger.error("Could not submit discussion answer.")
             return False
 
-    def get_connector(self) -> PerplexityConnector | GeminiConnector:
+    def get_connector(self) -> PerplexityConnector | GeminiConnector | OpenAIConnector | NvidiaConnector | AnthropicConnector:
         if config.PERPLEXITY_API_KEY:
             return PerplexityConnector()
+        if config.OPENAI_API_KEY:
+            return OpenAIConnector()
+        if config.ANTHROPIC_API_KEY:
+            return AnthropicConnector()
+        if config.NVIDIA_API_KEY:
+            return NvidiaConnector()
         if config.GEMINI_API_KEY:
             return GeminiConnector()
         raise RuntimeError("No API Key specified.")

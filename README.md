@@ -65,13 +65,24 @@ skipera introduction-psychology
 
 ## LLM Support
 
-If you wish to solve graded assignments automatically, add your Perplexity or Gemini API key to the config file and use the `--llm` flag:
+To solve graded assignments automatically, add an API key for any supported provider to `~/.skipera/config.json` and use the `--llm` flag:
 
 ```bash
 skipera introduction-psychology --llm
 ```
 
-Note that an average 10 question assignment consumes ~5000 input tokens. If you wish to use another LLM through an API, please feel free to make a pull request or contact me.
+### Supported providers
 
-Currently, only the single-choice and multiple-choice objective questions are supported in this mode. Note that you might
-not always achieve passing marks due to the LLM hallucinating sometimes.
+| Provider | Config key | Default model |
+|---|---|---|
+| Perplexity | `perplexity_api_key` | `sonar-pro` |
+| OpenAI | `openai_api_key` | `gpt-4o` |
+| Anthropic | `anthropic_api_key` | `claude-3-5-sonnet-latest` |
+| Nvidia | `nvidia_api_key` | `meta/llama-3.1-70b-instruct` |
+| Gemini | `gemini_api_key` | `gemini-3.1-flash-lite` |
+
+You can override the default model for any provider by setting the corresponding `*_model` key in the config (e.g. `"openai_model": "gpt-4.1-mini"`).
+
+If multiple API keys are present, the first one found in the order listed above is used.
+
+> **Note:** An average 10-question assignment consumes ~5000 input tokens. You might not always achieve passing marks due to LLM hallucinations.

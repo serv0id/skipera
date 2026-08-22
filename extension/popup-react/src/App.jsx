@@ -219,7 +219,11 @@ export default function App() {
           settings: { apiKey, provider, modelName }
         });
         
-        setStatus({ text: response?.status || "Solver running...", state: "working" });
+        if (response?.error || response?.status === "Error" || response?.status?.startsWith("Error")) {
+          setStatus({ text: response?.error || response?.status, state: "error" });
+        } else {
+          setStatus({ text: response?.status || "Solver running...", state: "working" });
+        }
       } catch (err) {
         setStatus({ text: "Error: Reload the page", state: "error" });
       }

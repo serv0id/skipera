@@ -44,7 +44,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       itemId: itemId,
       settings: request.settings
     }, response => {
-      sendResponse({ status: response?.status || "Background quiz solver started." });
+      sendResponse({ status: response?.error || response?.status || "Background quiz solver started.", error: response?.error });
     });
       
     return true; // Keep channel open for async
@@ -68,7 +68,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       slug: slug,
       settings: request.settings
     }, response => {
-      sendResponse({ status: response?.status || "Background orchestrator started." });
+      sendResponse({ status: response?.error || response?.status || "Background orchestrator started.", error: response?.error });
     });
     
     return true;

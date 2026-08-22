@@ -23,8 +23,29 @@ export async function runFullCourse(courseSlug, settings, tabId) {
   if (tabId && activeRuns.has(tabId) && !activeRuns.get(tabId).isCancelled) {
     return { status: "Already running for this tab" };
   }
+
+  const provider = settings?.provider || "nvidia";
+  const apiKeyStr = settings?.apiKey || "";
+  const keyList = apiKeyStr.split(",").map(k => k.trim()).filter(k => k);
   
-  const runContext = { courseSlug: safeSlug, isCancelled: false };
+  // Concurrency Guard: NVIDIA NIM free tier permits max 3 concurrent tasks per API key
+  if (provider === "nvidia") {
+    const maxAllowed = Math.max(1, keyList.length) * 3;
+    let currentNvidiaRuns = 0;
+    for (const [tId, run] of activeRuns.entries()) {
+      if (!run.isCancelled && (run.provider || "nvidia") === "nvidia") {
+        currentNvidiaRuns++;
+      }
+    }
+    
+    if (currentNvidiaRuns >= maxAllowed) {
+      const msg = `NVIDIA Concurrency Shield: ${currentNvidiaRuns}/${maxAllowed} concurrent course runs active. NVIDIA NIM permits max 3 concurrent tasks per API key. Please wait for an active tab to finish or add additional comma-separated API keys.`;
+      updateDashboard(msg, "error", safeSlug);
+      return { status: "Error", error: msg };
+    }
+  }
+  
+  const runContext = { courseSlug: safeSlug, provider, isCancelled: false };
   if (tabId) {
     activeRuns.set(tabId, runContext);
   }

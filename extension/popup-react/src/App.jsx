@@ -3,6 +3,7 @@ import { Settings2, KeyRound, Sparkles, BrainCircuit, Play, LayoutGrid, Palette 
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './components/Button';
 import { AuthorCard } from './components/AuthorCard';
+import PetCat from './components/PetCat';
 
 const modelOptions = {
   nvidia: [
@@ -187,6 +188,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col min-h-screen relative overflow-hidden p-4">
+      <PetCat />
       {/* Soft background blobs */}
       <div className="absolute top-[-20%] left-[-20%] w-[60%] h-[50%] bg-accent rounded-full blur-[60px] opacity-40 mix-blend-multiply pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[70%] h-[60%] bg-primary rounded-full blur-[80px] opacity-10 mix-blend-multiply pointer-events-none" />
@@ -212,16 +214,16 @@ export default function App() {
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.5, type: "spring" }}
           >
+            {/* Interactive Logo */}
             <motion.div 
-              whileHover={{ scale: 1.15, rotate: 12 }}
-              whileTap={{ scale: 0.9, rotate: -12 }}
-              transition={{ type: "spring", stiffness: 400, damping: 15 }}
-              className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center shadow-lg shadow-primary/20 border border-background/20 cursor-pointer overflow-hidden group"
+              className="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center cursor-pointer shadow-sm border border-primary/10"
+              whileHover={{ scale: 1.15, rotate: 15, transition: { type: "spring", stiffness: 400, damping: 10 } }}
+              whileTap={{ scale: 0.85, rotate: -15 }}
             >
               <motion.div 
-                className="absolute inset-0 opacity-0 bg-[radial-gradient(circle_at_center,var(--color-primary-foreground)_0%,transparent_70%)] mix-blend-overlay transition-opacity duration-300 group-hover:opacity-50"
+                className="w-4 h-4 bg-primary rounded-full"
+                whileHover={{ scale: 1.3 }}
               />
-              <Sparkles className="w-5 h-5 text-primary-foreground relative z-10 transition-transform duration-300 group-hover:scale-125 group-hover:text-white" />
             </motion.div>
             <div className="flex flex-col">
               <h1 className="text-xl font-extrabold tracking-tight text-primary leading-none">Skipera</h1>

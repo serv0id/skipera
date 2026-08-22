@@ -131,6 +131,12 @@ export async function runFullCourse(courseSlug, settings, tabId) {
             processedAny = true;
             break;
           } else if (["exam", "quiz", "assignment", "closedAssessment", "phasedPeer", "gradedPeer", "programming", "gradedProgramming", "staffGraded", "ungradedAssignment"].includes(item.contentSummary.typeName)) {
+            if (settings?.videosOnly || !settings?.apiKey?.trim()) {
+              updateProgress(`Skipping quiz (No API Key mode): ${item.name}`, "skip");
+              skippedItems.add(item.id);
+              processedAny = true;
+              break;
+            }
             updateProgress(`Triggering quiz solver for ${item.name}`);
             await triggerQuizSolver(courseId, item.id, settings, tabId, safeSlug, runContext);
             updateProgress(`Completed quiz item: ${item.name}`, "complete");
@@ -147,6 +153,12 @@ export async function runFullCourse(courseSlug, settings, tabId) {
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "discussionPrompt") {
+            if (settings?.videosOnly || !settings?.apiKey?.trim()) {
+              updateProgress(`Skipping discussion (No API Key mode): ${item.name}`, "skip");
+              skippedItems.add(item.id);
+              processedAny = true;
+              break;
+            }
             await solveDiscussion(courseId, item.id, settings, tabId);
             updateProgress(`Completed discussion: ${item.name}`, "complete");
             processedAny = true;

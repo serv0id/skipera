@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings2, KeyRound, Sparkles, BrainCircuit, Play, LayoutGrid, Palette, Atom, Pin } from 'lucide-react';
+import { Settings2, KeyRound, Sparkles, BrainCircuit, Play, LayoutGrid, Palette, Atom, Pin, FastForward } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './components/Button';
 import { AuthorCard } from './components/AuthorCard';
@@ -239,13 +239,18 @@ export default function App() {
   };
 
   const executeSolver = async (action) => {
-    if (!apiKey.trim()) {
-      setStatus({ text: "Error: API Key required", state: "error" });
+    const isVideosOnly = action === 'START_VIDEOS_ONLY' || !apiKey.trim();
+    
+    if (action === 'START_FULL_COURSE_SOLVER' && !apiKey.trim()) {
+      setStatus({ text: "No API Key: Running Videos & Readings only", state: "working" });
+    } else if (action === 'START_VIDEOS_ONLY') {
+      setStatus({ text: "Fast-forwarding videos & readings...", state: "working" });
+    } else if (!apiKey.trim()) {
+      setStatus({ text: "Error: API Key required for AI quiz solver", state: "error" });
       return;
     }
     
     setShowDashboard(true);
-    setStatus({ text: "Connecting to Coursera...", state: "working" });
     
     if (window.chrome && chrome.tabs) {
       try {
@@ -267,20 +272,28 @@ export default function App() {
 
         const response = await chrome.tabs.sendMessage(targetTab.id, {
           action: action,
-          settings: { apiKey, provider, modelName }
+          settings: { 
+            apiKey, 
+            provider, 
+            modelName, 
+            videosOnly: isVideosOnly 
+          }
         });
         
         if (response?.error || response?.status === "Error" || response?.status?.startsWith("Error")) {
           setStatus({ text: response?.error || response?.status, state: "error" });
         } else {
-          setStatus({ text: response?.status || "Solver running...", state: "working" });
+          setStatus({ 
+            text: isVideosOnly ? "Fast-forwarding videos & readings..." : (response?.status || "Solver running..."), 
+            state: "working" 
+          });
         }
       } catch (err) {
         setStatus({ text: "Error: Reload the Coursera page", state: "error" });
       }
     } else {
       // Mock for dev
-      setTimeout(() => setStatus({ text: "Solver complete", state: "idle" }), 2000);
+      setTimeout(() => setStatus({ text: "Completed successfully", state: "idle" }), 2000);
     }
   };
 
@@ -477,13 +490,13 @@ export default function App() {
           <div className="flex flex-col gap-1.5">
             <div className="flex justify-between items-end">
               <label className="text-[10.5px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 ml-0.5">
-                <KeyRound size={13} /> API Key
+                <KeyRound size={13} /> API Key <span className="text-[9px] font-medium text-muted-foreground/70 lowercase tracking-normal">(optional for videos & readings)</span>
               </label>
             </div>
             <textarea 
               rows={2}
               className="w-full bg-background/50 border border-input text-foreground text-[11.5px] font-mono rounded-xl px-3 py-2.5 outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 transition-all shadow-sm resize-none"
-              placeholder="nvapi-... or sk-..."
+              placeholder="nvapi-... or sk-... (Leave blank for Videos/Readings only)"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
@@ -495,21 +508,26 @@ export default function App() {
         <div className="flex flex-col gap-4 md:col-span-5 lg:col-span-4 h-full">
           {/* Action Buttons */}
           <div className="flex flex-col gap-3 bg-card/50 backdrop-blur-xl rounded-2xl p-5 md:p-6 border border-border/50 shadow-sm">
-          <Button 
-            variant="primary" 
-            onClick={() => executeSolver('START_SOLVER')}
-            icon={<Play size={16} fill="currentColor" />}
-          >
-            Solve Current Quiz
-          </Button>
-          <Button 
-            variant="secondary" 
-            onClick={() => executeSolver('START_FULL_COURSE_SOLVER')}
-            icon={<LayoutGrid size={16} />}
-          >
-            Auto-Solve Entire Course
-          </Button>
-        </div>
+            <Button 
+              variant="primary" 
+              onClick={() => executeSolver('START_VIDEOS_ONLY')}
+              icon={<FastForward size={16} />}
+            >
+              <div className="flex items-center justify-between w-full">
+                <span>Fast-Forward Videos & Readings</span>
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-primary-foreground/20 text-primary-foreground tracking-wider ml-1">
+                  No Key Needed
+                </span>
+              </div>
+            </Button>
+            <Button 
+              variant="secondary" 
+              onClick={() => executeSolver('START_FULL_COURSE_SOLVER')}
+              icon={<Sparkles size={16} />}
+            >
+              Auto-Solve Entire Course (with AI)
+            </Button>
+          </div>
 
         {/* Status Indicator */}
         <AnimatePresence>

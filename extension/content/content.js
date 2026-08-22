@@ -48,7 +48,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
       
     return true; // Keep channel open for async
-  } else if (request.action === "START_FULL_COURSE_SOLVER") {
+  } else if (request.action === "START_FULL_COURSE_SOLVER" || request.action === "START_VIDEOS_ONLY") {
     if (state.isSolving) {
       sendResponse({ status: "Solver already running" });
       return true;
@@ -63,10 +63,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     const slug = urlParts[learnIdx + 1];
 
+    const settings = {
+      ...(request.settings || {}),
+      videosOnly: request.action === "START_VIDEOS_ONLY" || request.settings?.videosOnly
+    };
+
     chrome.runtime.sendMessage({
       action: "RUN_FULL_COURSE",
       slug: slug,
-      settings: request.settings
+      settings: settings
     }, response => {
       sendResponse({ status: response?.error || response?.status || "Background orchestrator started.", error: response?.error });
     });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings2, KeyRound, Sparkles, BrainCircuit, Play, LayoutGrid, Palette, Atom } from 'lucide-react';
+import { Settings2, KeyRound, Sparkles, BrainCircuit, Play, LayoutGrid, Palette, Atom, Pin } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './components/Button';
 import { AuthorCard } from './components/AuthorCard';
@@ -47,29 +47,69 @@ export default function App() {
   const [completionRate, setCompletionRate] = useState(0);
   const [courseSlug, setCourseSlug] = useState('');
 
+  const isStickyMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sticky') === 'true';
+
   useEffect(() => {
     // Apply theme to document html element so CSS variables propagate correctly
     document.documentElement.className = theme;
   }, [theme]);
 
-  // 1. Detect current course from active tab
+  const openStickyMode = () => {
+    if (isStickyMode) return;
+    if (window.chrome && chrome.windows) {
+      chrome.windows.create({
+        url: chrome.runtime.getURL("popup/index.html?sticky=true"),
+        type: "popup",
+        width: 440,
+        height: 640,
+        top: 80,
+        left: (window.screen.availWidth || 1200) - 460,
+        focused: true
+      }, () => {
+        window.close();
+      });
+    } else {
+      window.open(window.location.href + "?sticky=true", "skipera_sticky", "width=440,height=640");
+    }
+  };
+
+  // 1. Detect current course from active tab (works in popup and sticky mode)
   useEffect(() => {
     if (window.chrome && chrome.tabs) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs && tabs[0]?.url) {
-          try {
-            const urlObj = new URL(tabs[0].url);
+      const detectSlug = async () => {
+        try {
+          // Check coursera tabs across windows first
+          const courseraTabs = await chrome.tabs.query({ url: "*://*.coursera.org/*" });
+          const targetTab = courseraTabs?.find(t => t.active) || courseraTabs?.[0];
+          if (targetTab?.url) {
+            const urlObj = new URL(targetTab.url);
             const urlParts = urlObj.pathname.split('/');
             const learnIdx = urlParts.indexOf('learn');
             if (learnIdx !== -1 && urlParts[learnIdx + 1]) {
-              const slug = urlParts[learnIdx + 1];
-              setCourseSlug(slug);
+              setCourseSlug(urlParts[learnIdx + 1]);
+              return;
             }
-          } catch (e) {
-            console.warn("Could not parse tab URL", e);
           }
+          
+          // Fallback to active tab in current window
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tab?.url) {
+            const urlObj = new URL(tab.url);
+            const urlParts = urlObj.pathname.split('/');
+            const learnIdx = urlParts.indexOf('learn');
+            if (learnIdx !== -1 && urlParts[learnIdx + 1]) {
+              setCourseSlug(urlParts[learnIdx + 1]);
+            }
+          }
+        } catch (e) {
+          console.warn("Could not detect course tab", e);
         }
-      });
+      };
+
+      detectSlug();
+      const tabActivatedListener = () => detectSlug();
+      chrome.tabs.onActivated?.addListener(tabActivatedListener);
+      return () => chrome.tabs.onActivated?.removeListener(tabActivatedListener);
     }
   }, []);
 
@@ -208,13 +248,23 @@ export default function App() {
     
     if (window.chrome && chrome.tabs) {
       try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab || !tab.url || !tab.url.includes("coursera.org")) {
-          setStatus({ text: "Error: Must be on a Coursera tab", state: "error" });
+        let targetTab = null;
+        
+        // Find Coursera tab (active one preferred, cross-window compatible for sticky mode)
+        const courseraTabs = await chrome.tabs.query({ url: "*://*.coursera.org/*" });
+        if (courseraTabs && courseraTabs.length > 0) {
+          targetTab = courseraTabs.find(t => t.active) || courseraTabs[0];
+        } else {
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          targetTab = tab;
+        }
+
+        if (!targetTab || !targetTab.url || !targetTab.url.includes("coursera.org")) {
+          setStatus({ text: "Error: Must have an open Coursera tab", state: "error" });
           return;
         }
 
-        const response = await chrome.tabs.sendMessage(tab.id, {
+        const response = await chrome.tabs.sendMessage(targetTab.id, {
           action: action,
           settings: { apiKey, provider, modelName }
         });
@@ -225,7 +275,7 @@ export default function App() {
           setStatus({ text: response?.status || "Solver running...", state: "working" });
         }
       } catch (err) {
-        setStatus({ text: "Error: Reload the page", state: "error" });
+        setStatus({ text: "Error: Reload the Coursera page", state: "error" });
       }
     } else {
       // Mock for dev
@@ -272,7 +322,22 @@ export default function App() {
               <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-0.5">Next-Gen Solver</span>
             </div>
           </motion.div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <motion.button 
+              onClick={openStickyMode}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm border ${
+                isStickyMode 
+                  ? "bg-primary text-primary-foreground border-primary shadow-primary/20" 
+                  : "bg-primary/10 hover:bg-primary/20 text-primary border-primary/20 hover:border-primary/40"
+              }`}
+              title={isStickyMode ? "Sticky Mode: Pinned persistent window! Won't close on blur or tab switch 🧲✨" : "Pin as a persistent window that stays open! 🧲📌"}
+            >
+              <Pin size={13} className={isStickyMode ? "fill-current rotate-45" : "rotate-45"} />
+              <span>{isStickyMode ? "Stick Me !! 🧲📌" : "Stick me !! 📌"}</span>
+            </motion.button>
+
             <button 
               onClick={() => setShowDashboard(true)}
               className="relative w-9 h-9 rounded-full bg-primary/5 hover:bg-primary/10 text-primary flex items-center justify-center transition-colors cursor-pointer"

@@ -28,7 +28,8 @@
     "storage",
     "cookies",
     "activeTab",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "*://*.coursera.org/*",

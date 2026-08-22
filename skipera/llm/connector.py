@@ -13,6 +13,7 @@ class ResponseFormat(BaseModel):
     question_type: Literal["MULTIPLE_CHOICE", "CHECKBOX", "TEXT_REFLECT",
                             "NUMERIC", "PLAIN_TEXT", "TEXT_EXACT_MATCH", "REGEX",
                             "FILE_UPLOAD", "URL"]
+    reasoning: str
     chosen: Optional[List[str]] = None
     answer: Optional[str] = None
 

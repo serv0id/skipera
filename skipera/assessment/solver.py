@@ -23,6 +23,7 @@ SYSTEM_PROMPT = (
     "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', 'TEXT_REFLECT', 'NUMERIC', 'PLAIN_TEXT', 'TEXT_EXACT_MATCH', 'REGEX', 'FILE_UPLOAD', or 'URL'.\n"
     "- 'previous_attempts': (optional) past attempt results — for CHECKBOX these are option combinations, "
     "for the text/numeric/file types these are answers already graded INCORRECT, each with a hint if the grader gave one.\n\n"
+    "CRITICAL: Always provide a step-by-step logical deduction in the 'reasoning' field before providing your final answer.\n\n"
     "Rules for each question type:\n"
     "1. MULTIPLE_CHOICE: Single-choice question. Select exactly one option_id and place it in the 'chosen' list.\n"
     "2. CHECKBOX: Multi-choice question. Select one or more option_ids and place them in the 'chosen' list.\n"
@@ -59,10 +60,12 @@ TEXT_ANSWER_TYPES = {"TEXT_REFLECT", "NUMERIC", "PLAIN_TEXT", "TEXT_EXACT_MATCH"
 
 
 class GradedSolver(object):
-    def __init__(self, session: httpx.Client, course_id: str, item_id: str):
+    def __init__(self, session: httpx.Client, course_id: str, item_id: str, course_name: str = "", item_name: str = ""):
         self.session: httpx.Client = session
         self.course_id: str = course_id
         self.item_id: str = item_id
+        self.course_name: str = course_name
+        self.item_name: str = item_name
         self.attempt_id = None
         self.draft_id = None
         self.discarded_questions = []
@@ -306,8 +309,13 @@ class GradedSolver(object):
             if unsolved_questions:
                 self._last_unsolved_empty = False
                 connector = get_connector()
+                
+                custom_prompt = SYSTEM_PROMPT
+                if self.course_name and self.item_name:
+                    custom_prompt += f"\n\nContext: You are solving a quiz/assignment named '{self.item_name}' for the course '{self.course_name}'. Use this context to inform your reasoning."
+                
                 llm_result = connector.get_response(
-                    unsolved_questions, system_prompt=SYSTEM_PROMPT, response_schema=DEFAULT_RESPONSE_SCHEMA)
+                    unsolved_questions, system_prompt=custom_prompt, response_schema=DEFAULT_RESPONSE_SCHEMA)
                 for ans in llm_result.get("responses", []):
                     answer_responses.append(self._format_response(
                         part_id=ans["question_id"],

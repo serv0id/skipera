@@ -64,6 +64,11 @@ class LiteLLMConnector(object):
                 "json_schema": {"name": "response", "schema": response_schema, "strict": False},
             }
 
+        if "nvidia" in self.model or "nemotron" in self.model:
+            kwargs["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": False}
+            }
+
         response = completion(
             model=self.model,
             messages=[

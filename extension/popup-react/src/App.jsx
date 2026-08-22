@@ -46,6 +46,7 @@ export default function App() {
   const [showDashboard, setShowDashboard] = useState(false);
   const [completionRate, setCompletionRate] = useState(0);
   const [courseSlug, setCourseSlug] = useState('');
+  const [hoveredBtn, setHoveredBtn] = useState(null);
 
   const isStickyMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sticky') === 'true';
 
@@ -300,70 +301,135 @@ export default function App() {
       <main className="relative z-10 flex flex-col flex-1 mt-6 md:mt-10 gap-6 md:grid md:grid-cols-12 md:items-start">
         
         {/* Header */}
-        <header className="flex items-center justify-between md:col-span-12 mb-2 md:mb-6">
+        <header className="flex items-center justify-between md:col-span-12 mb-3 md:mb-6">
           <motion.div 
-            className="flex items-center gap-2.5"
+            className="flex items-center gap-3"
             initial={{ y: -10, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.5, type: "spring" }}
           >
             {/* Interactive Logo */}
             <motion.div 
-              className="w-9 h-9 bg-primary/10 text-primary rounded-xl flex items-center justify-center cursor-pointer shadow-sm border border-primary/10"
+              className="w-11 h-11 bg-primary/10 text-primary rounded-xl flex items-center justify-center cursor-pointer shadow-sm border border-primary/15"
               whileHover={{ scale: 1.15, rotate: 180, transition: { type: "spring", stiffness: 400, damping: 10 } }}
               whileTap={{ scale: 0.85, rotate: -180 }}
             >
               <motion.div whileHover={{ scale: 1.2 }}>
-                <Atom size={20} strokeWidth={2.5} />
+                <Atom size={24} strokeWidth={2.5} />
               </motion.div>
             </motion.div>
             <div className="flex flex-col">
-              <h1 className="text-xl font-extrabold tracking-tight text-primary leading-none">Skipera</h1>
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-0.5">Next-Gen Solver</span>
+              <h1 className="text-2xl font-extrabold tracking-tight text-primary leading-none">Skipera</h1>
+              <span className="text-[10.5px] font-semibold text-muted-foreground uppercase tracking-wider mt-0.5">Next-Gen Solver</span>
             </div>
           </motion.div>
-          <div className="flex items-center gap-2">
-            <motion.button 
-              onClick={openStickyMode}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm border ${
-                isStickyMode 
-                  ? "bg-primary text-primary-foreground border-primary shadow-primary/20" 
-                  : "bg-primary/10 hover:bg-primary/20 text-primary border-primary/20 hover:border-primary/40"
-              }`}
-              title={isStickyMode ? "Sticky Mode: Pinned persistent window! Won't close on blur or tab switch 🧲✨" : "Pin as a persistent window that stays open! 🧲📌"}
-            >
-              <Pin size={13} className={isStickyMode ? "fill-current rotate-45" : "rotate-45"} />
-              <span>{isStickyMode ? "Stick Me !! 🧲📌" : "Stick me !! 📌"}</span>
-            </motion.button>
 
-            <button 
-              onClick={() => setShowDashboard(true)}
-              className="relative w-9 h-9 rounded-full bg-primary/5 hover:bg-primary/10 text-primary flex items-center justify-center transition-colors cursor-pointer"
-              title="View Dashboard"
-            >
-              <svg className="w-full h-full transform -rotate-90 absolute inset-0" viewBox="0 0 36 36">
-                <circle cx="18" cy="18" r="16" fill="none" className="stroke-primary/20" strokeWidth="2.5" />
-                <circle 
-                  cx="18" cy="18" r="16" 
-                  fill="none" 
-                  className="stroke-primary transition-all duration-500 ease-out" 
-                  strokeWidth="2.5" 
-                  strokeDasharray="100.53" 
-                  strokeDashoffset={100.53 - (100.53 * completionRate) / 100} 
-                  strokeLinecap="round" 
-                />
-              </svg>
-              <span className="text-[9px] font-bold z-10 select-none">{completionRate}%</span>
-            </button>
-            <button 
-              onClick={toggleTheme}
-              className="p-2 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-colors cursor-pointer"
-              title="Toggle Theme"
-            >
-              <Palette size={20} />
-            </button>
+          {/* Action Buttons Toolbar with Dynamic Hover Tooltips */}
+          <div className="flex items-center gap-2.5">
+            
+            {/* 1. Pin / Stick Me Button */}
+            <div className="relative flex flex-col items-center">
+              <motion.button 
+                onClick={openStickyMode}
+                onMouseEnter={() => setHoveredBtn('pin')}
+                onMouseLeave={() => setHoveredBtn(null)}
+                whileHover={{ scale: 1.15, rotate: isStickyMode ? 0 : 25, transition: { type: "spring", stiffness: 400, damping: 12 } }}
+                whileTap={{ scale: 0.85, rotate: -30 }}
+                className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-sm border ${
+                  isStickyMode 
+                    ? "bg-primary text-primary-foreground border-primary shadow-md shadow-primary/30" 
+                    : "bg-primary/10 hover:bg-primary/20 text-primary border-primary/15 hover:border-primary/30"
+                }`}
+                aria-label="Pin window"
+              >
+                <Pin size={22} strokeWidth={2.2} className={isStickyMode ? "fill-current" : ""} />
+              </motion.button>
+              
+              <AnimatePresence>
+                {hoveredBtn === 'pin' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 6, scale: 0.85 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.85 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-13 px-2.5 py-1 rounded-lg bg-card/95 text-foreground border border-border shadow-xl text-[11px] font-bold whitespace-nowrap pointer-events-none z-50 backdrop-blur-md"
+                  >
+                    {isStickyMode ? "Pinned 🧲📌" : "Stick Me !! 🧲📌"}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* 2. Completion Percentage / Dashboard Button */}
+            <div className="relative flex flex-col items-center">
+              <motion.button 
+                onClick={() => setShowDashboard(true)}
+                onMouseEnter={() => setHoveredBtn('dashboard')}
+                onMouseLeave={() => setHoveredBtn(null)}
+                whileHover={{ scale: 1.15, rotate: 12, transition: { type: "spring", stiffness: 400, damping: 12 } }}
+                whileTap={{ scale: 0.85, rotate: -15 }}
+                className="w-11 h-11 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center transition-all cursor-pointer relative shadow-sm border border-primary/15 hover:border-primary/30"
+                aria-label="View Dashboard"
+              >
+                <svg className="w-9 h-9 transform -rotate-90 absolute inset-0 m-auto" viewBox="0 0 36 36">
+                  <circle cx="18" cy="18" r="15" fill="none" className="stroke-primary/20" strokeWidth="3" />
+                  <circle 
+                    cx="18" cy="18" r="15" 
+                    fill="none" 
+                    className="stroke-primary transition-all duration-500 ease-out" 
+                    strokeWidth="3" 
+                    strokeDasharray="94.25" 
+                    strokeDashoffset={94.25 - (94.25 * completionRate) / 100} 
+                    strokeLinecap="round" 
+                  />
+                </svg>
+                <span className="text-[10px] font-extrabold z-10 select-none">{completionRate}%</span>
+              </motion.button>
+              
+              <AnimatePresence>
+                {hoveredBtn === 'dashboard' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 6, scale: 0.85 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.85 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-13 px-2.5 py-1 rounded-lg bg-card/95 text-foreground border border-border shadow-xl text-[11px] font-bold whitespace-nowrap pointer-events-none z-50 backdrop-blur-md"
+                  >
+                    Dashboard 📊
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* 3. Theme Toggle Button */}
+            <div className="relative flex flex-col items-center">
+              <motion.button 
+                onClick={toggleTheme}
+                onMouseEnter={() => setHoveredBtn('theme')}
+                onMouseLeave={() => setHoveredBtn(null)}
+                whileHover={{ scale: 1.15, rotate: 90, transition: { type: "spring", stiffness: 400, damping: 12 } }}
+                whileTap={{ scale: 0.85, rotate: 270 }}
+                className="w-11 h-11 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center transition-all cursor-pointer shadow-sm border border-primary/15 hover:border-primary/30"
+                aria-label="Toggle Theme"
+              >
+                <Palette size={22} strokeWidth={2.2} />
+              </motion.button>
+              
+              <AnimatePresence>
+                {hoveredBtn === 'theme' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 6, scale: 0.85 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 4, scale: 0.85 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-13 px-2.5 py-1 rounded-lg bg-card/95 text-foreground border border-border shadow-xl text-[11px] font-bold whitespace-nowrap pointer-events-none z-50 backdrop-blur-md"
+                  >
+                    Theme 🎨
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
           </div>
         </header>
 

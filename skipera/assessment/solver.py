@@ -11,7 +11,7 @@ from ..config import GRAPHQL_URL, CONFIG_DIR
 from .queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                       INITIATE_ATTEMPT_QUERY, ASSIGNMENT_FEEDBACK_QUERY)
 from loguru import logger
-from ..llm.connector import DEFAULT_RESPONSE_SCHEMA, PerplexityConnector, GeminiConnector, OpenAIConnector, NvidiaConnector, AnthropicConnector
+from ..llm.connector import DEFAULT_RESPONSE_SCHEMA, get_connector
 from ..session_utils import get_csrf_headers, random_delay
 
 
@@ -238,19 +238,7 @@ class GradedSolver(object):
                             unsolved_questions[part_id]["previous_attempts"] = virtual_feedbacks
 
             if unsolved_questions:
-                if config.PERPLEXITY_API_KEY:
-                    connector = PerplexityConnector()
-                elif config.OPENAI_API_KEY:
-                    connector = OpenAIConnector()
-                elif config.ANTHROPIC_API_KEY:
-                    connector = AnthropicConnector()
-                elif config.NVIDIA_API_KEY:
-                    connector = NvidiaConnector()
-                elif config.GEMINI_API_KEY:
-                    connector = GeminiConnector()
-                else:
-                    raise RuntimeError("No API Key specified.")
-
+                connector = get_connector()
                 llm_result = connector.get_response(
                     unsolved_questions, system_prompt=SYSTEM_PROMPT, response_schema=DEFAULT_RESPONSE_SCHEMA)
                 for ans in llm_result.get("responses", []):

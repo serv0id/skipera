@@ -5,7 +5,7 @@ import httpx
 from loguru import logger
 
 from .. import config
-from ..llm.connector import GeminiConnector, PerplexityConnector, OpenAIConnector, NvidiaConnector, AnthropicConnector
+from ..llm.connector import get_connector
 from ..session_utils import get_csrf_headers, random_delay
 
 
@@ -56,7 +56,7 @@ class DiscussionPromptSolver(object):
             logger.error("Could not retrieve discussion prompt.")
             return False
 
-        connector = self.get_connector()
+        connector = get_connector()
         answer = connector.get_response(self.format_llm_prompt(
             prompt), system_prompt=SYSTEM_PROMPT)
 
@@ -66,19 +66,6 @@ class DiscussionPromptSolver(object):
         else:
             logger.error("Could not submit discussion answer.")
             return False
-
-    def get_connector(self) -> PerplexityConnector | GeminiConnector | OpenAIConnector | NvidiaConnector | AnthropicConnector:
-        if config.PERPLEXITY_API_KEY:
-            return PerplexityConnector()
-        if config.OPENAI_API_KEY:
-            return OpenAIConnector()
-        if config.ANTHROPIC_API_KEY:
-            return AnthropicConnector()
-        if config.NVIDIA_API_KEY:
-            return NvidiaConnector()
-        if config.GEMINI_API_KEY:
-            return GeminiConnector()
-        raise RuntimeError("No API Key specified.")
 
     def get_prompt(self) -> dict | None:
         res = self.session.get(

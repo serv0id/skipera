@@ -43,9 +43,13 @@ def get_connector() -> "LiteLLMConnector":
 
 class LiteLLMConnector(object):
     def __init__(self, provider: str):
-        prefix, api_key, model, env_var = PROVIDERS[provider]
+        prefix, api_keys, model, env_var = PROVIDERS[provider]
         self.model = f"{prefix}/{model}"
-        os.environ[env_var] = api_key
+        self.env_var = env_var
+        self.api_keys = api_keys if isinstance(api_keys, list) else [api_keys]
+        self.current_key_idx = 0
+        if self.api_keys:
+            os.environ[self.env_var] = self.api_keys[self.current_key_idx]
 
     def get_response(
             self,
@@ -69,15 +73,28 @@ class LiteLLMConnector(object):
                 "chat_template_kwargs": {"enable_thinking": False}
             }
 
-        response = completion(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(prompt) if isinstance(prompt, dict) else prompt},
-            ],
-            timeout=300.0,
-            **kwargs,
-        )
+        from litellm.exceptions import RateLimitError, AuthenticationError
+        
+        for attempt in range(len(self.api_keys) or 1):
+            try:
+                response = completion(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": json.dumps(prompt) if isinstance(prompt, dict) else prompt},
+                    ],
+                    timeout=300.0,
+                    **kwargs,
+                )
+                break
+            except (RateLimitError, AuthenticationError) as e:
+                logger.warning(f"Key {self.current_key_idx} failed with {type(e).__name__}: {str(e)}")
+                if len(self.api_keys) > 1:
+                    self.current_key_idx = (self.current_key_idx + 1) % len(self.api_keys)
+                    os.environ[self.env_var] = self.api_keys[self.current_key_idx]
+                    logger.info(f"Swapped to next key (index {self.current_key_idx}). Retrying...")
+                if attempt == len(self.api_keys) - 1:
+                    raise e
 
         content = response["choices"][0]["message"]["content"]
         if response_schema is not None:

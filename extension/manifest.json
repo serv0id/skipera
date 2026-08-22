@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Skipera: AI Course Solver",
+  "version": "1.0.0",
+  "description": "Automatically solves Coursera quizzes using AI.",
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "Skipera"
+  },
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.coursera.org/*"
+      ],
+      "css": [
+        "content/content.css"
+      ],
+      "js": [
+        "content/content.js"
+      ]
+    }
+  ],
+  "permissions": [
+    "storage",
+    "cookies",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.coursera.org/*",
+    "https://integrate.api.nvidia.com/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ]
+}

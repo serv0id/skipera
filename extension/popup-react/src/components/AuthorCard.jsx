@@ -45,7 +45,7 @@ export function AuthorCard({ name, role, username, colorHex }) {
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       style={{ rotateX, rotateY, transformPerspective: 800 }}
-      className="flex items-center gap-2 p-1.5 px-2 rounded-xl bg-card/60 backdrop-blur-md border border-border/50 decoration-none text-inherit overflow-hidden relative group shadow-sm hover:shadow-md"
+      className="flex items-center gap-2 p-1.5 px-2 md:p-2 md:px-3 rounded-xl bg-card/60 backdrop-blur-md border border-border/50 decoration-none text-inherit overflow-hidden relative group shadow-sm hover:shadow-md"
       whileHover={{ 
         scale: 1.02, 
         backgroundColor: "var(--card)", 
@@ -64,8 +64,8 @@ export function AuthorCard({ name, role, username, colorHex }) {
       </motion.div>
       
       <motion.div style={{ x: useTransform(mouseXSpring, [-0.5, 0.5], [-1, 1]), y: useTransform(mouseYSpring, [-0.5, 0.5], [-1, 1]) }} className="flex flex-col overflow-hidden flex-1 pointer-events-none">
-        <span className="text-[10.5px] font-bold text-foreground truncate leading-tight tracking-tight">{name}</span>
-        <span className="text-[9px] text-muted-foreground leading-tight">{role}</span>
+        <span className="text-[10.5px] md:text-xs font-bold text-foreground truncate leading-tight tracking-tight">{name}</span>
+        <span className="text-[9px] md:text-[10px] text-muted-foreground leading-tight">{role}</span>
       </motion.div>
 
       <motion.div 

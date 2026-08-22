@@ -51,10 +51,10 @@ Currently, the extension must be loaded as an "Unpacked Extension" in Developer 
 
 ## Credits
 
-Developed by **yamantaka-singh** and **serv0id**.
+Developed by **Mrityunjay** and **serv0id**.
 
 <a href="https://github.com/yamantaka-singh">
-  <img src="https://github.com/yamantaka-singh.png" width="50" height="50" style="border-radius:50%; margin-right:10px; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" alt="yamantaka-singh">
+  <img src="https://github.com/yamantaka-singh.png" width="50" height="50" style="border-radius:50%; margin-right:10px; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" alt="Mrityunjay">
 </a>
 <a href="https://github.com/serv0id">
   <img src="https://github.com/serv0id.png" width="50" height="50" style="border-radius:50%; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'" alt="serv0id">

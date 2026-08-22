@@ -14,9 +14,22 @@ const LAZY_PHRASES = [
 // Oneko sprite offsets (32x32 grid)
 const SPRITE_STATES = {
   idle: [[-3, -3]],
+  alert: [[-7, -3]],
+  scratchSelf: [[-5, 0], [-6, 0], [-7, 0]],
+  scratchWallN: [[0, 0], [0, -1]],
+  scratchWallS: [[-7, -1], [-6, -2]],
+  scratchWallE: [[-2, -2], [-2, -3]],
+  scratchWallW: [[-4, 0], [-4, -1]],
+  tired: [[-3, -2]],
   sleep: [[-2, 0], [-2, -1]],
-  runRight: [[-4, -2], [-4, -3]],
-  runLeft: [[-4, 0], [-4, -1]]
+  runN: [[0, -2], [0, -3]],
+  runNE: [[-1, -2], [-1, -3]],
+  runE: [[-4, -2], [-4, -3]],
+  runSE: [[-5, -1], [-5, -2]],
+  runS: [[-5, -3], [-6, -1]],
+  runSW: [[-3, 0], [-3, -1]],
+  runW: [[-4, 0], [-4, -1]],
+  runNW: [[-1, 0], [-1, -1]]
 };
 
 export default function PetCat() {
@@ -115,20 +128,26 @@ export default function PetCat() {
       // Update Matter Physics Engine (fixed timestep approximation)
       Matter.Engine.update(engine, dt);
 
-      // State Machine (Walk vs Sleep)
+      // State Machine (Walk vs Sleep vs Scratch)
       if (!dialogue) {
         stateTimer.current -= dt;
         if (stateTimer.current <= 0) {
-          if (state.current === 'sleep') {
+          if (state.current === 'sleep' || state.current === 'scratch') {
             state.current = 'walk';
             stateTimer.current = 4000 + Math.random() * 5000;
           } else {
-            state.current = 'sleep';
-            stateTimer.current = 5000 + Math.random() * 10000;
+            // Pick sleep or scratch
+            if (Math.random() > 0.5) {
+              state.current = 'sleep';
+              stateTimer.current = 5000 + Math.random() * 10000;
+            } else {
+              state.current = 'scratch';
+              stateTimer.current = 3000 + Math.random() * 3000;
+            }
           }
         }
       } else {
-        state.current = 'idle';
+        state.current = 'alert';
       }
 
       // Apply Steering Forces
@@ -163,6 +182,15 @@ export default function PetCat() {
         containerRef.current.style.transform = `translate3d(${cat.position.x - CAT_RADIUS}px, ${cat.position.y - CAT_RADIUS}px, 0) scale(${scale})`;
         // Also update Z-index so it renders behind things when high up, and in front when low down
         containerRef.current.style.zIndex = Math.floor(depthRatio * 100) + 10;
+        
+        // Ghost Mode for view un-blocking
+        if (state.current === 'sleep') {
+          containerRef.current.style.opacity = '0.3';
+          containerRef.current.style.pointerEvents = 'none';
+        } else {
+          containerRef.current.style.opacity = '1';
+          containerRef.current.style.pointerEvents = 'auto';
+        }
       }
 
       // Sprite Animation (5 FPS)
@@ -172,9 +200,31 @@ export default function PetCat() {
         frameIndex++;
         
         let visualState = 'idle';
-        if (state.current === 'sleep') visualState = 'sleep';
-        else if (state.current === 'walk') {
-          visualState = cat.velocity.x >= 0 ? 'runRight' : 'runLeft';
+        if (state.current === 'sleep') {
+          visualState = 'sleep';
+        } else if (state.current === 'alert') {
+          visualState = 'alert';
+        } else if (state.current === 'scratch') {
+          const w = window.innerWidth;
+          const h = window.innerHeight;
+          const x = cat.position.x;
+          const y = cat.position.y;
+          const margin = 40;
+          if (x < margin) visualState = 'scratchWallW';
+          else if (x > w - margin) visualState = 'scratchWallE';
+          else if (y < margin) visualState = 'scratchWallN';
+          else if (y > h - margin) visualState = 'scratchWallS';
+          else visualState = 'scratchSelf';
+        } else if (state.current === 'walk') {
+          const speed = Matter.Vector.magnitude(cat.velocity);
+          if (speed > 0.1) {
+            const angle = Math.atan2(cat.velocity.y, cat.velocity.x);
+            const octant = Math.round(8 * angle / (2 * Math.PI) + 8) % 8;
+            const dirs = ['runE', 'runSE', 'runS', 'runSW', 'runW', 'runNW', 'runN', 'runNE'];
+            visualState = dirs[octant];
+          } else {
+            visualState = 'idle';
+          }
         }
 
         const frames = SPRITE_STATES[visualState] || SPRITE_STATES.idle;

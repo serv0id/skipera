@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings2, KeyRound, Sparkles, BrainCircuit, Play, LayoutGrid, Palette } from 'lucide-react';
+import { Settings2, KeyRound, Sparkles, BrainCircuit, Play, LayoutGrid, Palette, Atom } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './components/Button';
 import { AuthorCard } from './components/AuthorCard';
@@ -187,7 +187,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen relative overflow-hidden p-4">
+    <div className="flex flex-col min-h-screen relative overflow-hidden p-4 md:p-8 w-full max-w-5xl mx-auto">
       <PetCat />
       {/* Soft background blobs */}
       <div className="absolute top-[-20%] left-[-20%] w-[60%] h-[50%] bg-accent rounded-full blur-[60px] opacity-40 mix-blend-multiply pointer-events-none" />
@@ -204,10 +204,10 @@ export default function App() {
         <Palette size={16} />
       </motion.button>
 
-      <main className="relative z-10 flex flex-col flex-1 mt-6">
+      <main className="relative z-10 flex flex-col flex-1 mt-6 md:mt-10 gap-6 md:grid md:grid-cols-12 md:items-start">
         
         {/* Header */}
-        <header className="flex flex-col items-center justify-center mb-5 mt-1">
+        <header className="flex flex-col items-center justify-center md:items-start md:col-span-12 mb-2 md:mb-6">
           <motion.div 
             className="flex items-center gap-2.5"
             initial={{ y: -10, opacity: 0 }}
@@ -216,14 +216,13 @@ export default function App() {
           >
             {/* Interactive Logo */}
             <motion.div 
-              className="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center cursor-pointer shadow-sm border border-primary/10"
-              whileHover={{ scale: 1.15, rotate: 15, transition: { type: "spring", stiffness: 400, damping: 10 } }}
-              whileTap={{ scale: 0.85, rotate: -15 }}
+              className="w-9 h-9 bg-primary/10 text-primary rounded-xl flex items-center justify-center cursor-pointer shadow-sm border border-primary/10"
+              whileHover={{ scale: 1.15, rotate: 180, transition: { type: "spring", stiffness: 400, damping: 10 } }}
+              whileTap={{ scale: 0.85, rotate: -180 }}
             >
-              <motion.div 
-                className="w-4 h-4 bg-primary rounded-full"
-                whileHover={{ scale: 1.3 }}
-              />
+              <motion.div whileHover={{ scale: 1.2 }}>
+                <Atom size={20} strokeWidth={2.5} />
+              </motion.div>
             </motion.div>
             <div className="flex flex-col">
               <h1 className="text-xl font-extrabold tracking-tight text-primary leading-none">Skipera</h1>
@@ -233,7 +232,7 @@ export default function App() {
         </header>
 
         {/* Form Container */}
-        <div className="flex flex-col gap-3.5 bg-card backdrop-blur-xl rounded-2xl p-4 border border-border shadow-sm flex-1">
+        <div className="flex flex-col gap-4 bg-card backdrop-blur-xl rounded-2xl p-5 md:p-6 border border-border shadow-sm flex-1 md:col-span-7 lg:col-span-8 h-full">
           
           {/* Provider Select */}
           <div className="flex flex-col gap-1.5">
@@ -290,8 +289,10 @@ export default function App() {
 
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col gap-2 mt-4">
+        {/* Actions & Status Container */}
+        <div className="flex flex-col gap-4 md:col-span-5 lg:col-span-4 h-full">
+          {/* Action Buttons */}
+          <div className="flex flex-col gap-3 bg-card/50 backdrop-blur-xl rounded-2xl p-5 md:p-6 border border-border/50 shadow-sm">
           <Button 
             variant="primary" 
             onClick={() => executeSolver('START_SOLVER')}
@@ -332,16 +333,17 @@ export default function App() {
               </div>
             </motion.div>
           )}
-        </AnimatePresence>
+          </AnimatePresence>
+        </div>
 
       </main>
 
       {/* Footer Authors */}
-      <footer className="mt-5 relative z-10">
+      <footer className="mt-auto sticky bottom-0 z-30 pb-4 pt-4 bg-background/90 backdrop-blur-md">
         <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest text-center mb-2">Created By</div>
         <div className="grid grid-cols-2 gap-2">
           <AuthorCard name="serv0id" role="Original Creator" username="serv0id" />
-          <AuthorCard name="yamantaka" role="Extension & Engine" username="yamantaka-singh" />
+          <AuthorCard name="Mrityunjay" role="Extension & Engine" username="yamantaka-singh" />
         </div>
       </footer>
     </div>

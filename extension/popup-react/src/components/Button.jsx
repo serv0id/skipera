@@ -14,7 +14,7 @@ export function Button({
   icon,
   ...props 
 }) {
-  const baseStyles = "relative w-full py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 overflow-hidden outline-none";
+  const baseStyles = "relative w-full py-2.5 px-4 md:py-3 md:px-5 rounded-lg text-sm md:text-base font-semibold flex items-center justify-center gap-2 overflow-hidden outline-none";
   
   const variants = {
     primary: "bg-primary/80 backdrop-blur-md text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/20 border border-primary/30",

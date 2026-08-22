@@ -20,13 +20,20 @@ SYSTEM_PROMPT = (
     "The questions are in a dict format where each key represents the question id, and the value is a JSON dict containing:\n"
     "- 'Question': the question text (which might have HTML tags, ignore them).\n"
     "- 'Options': a list of options (for MULTIPLE_CHOICE and CHECKBOX types) with option_id and value.\n"
-    "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', or 'TEXT_REFLECT'.\n"
-    "- 'previous_attempts': (optional, only for CHECKBOX) past attempt results.\n\n"
+    "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', 'TEXT_REFLECT', 'NUMERIC', 'PLAIN_TEXT', 'TEXT_EXACT_MATCH', 'REGEX', 'FILE_UPLOAD', or 'URL'.\n"
+    "- 'previous_attempts': (optional) past attempt results — for CHECKBOX these are option combinations, "
+    "for the text/numeric/file types these are answers already graded INCORRECT, each with a hint if the grader gave one.\n\n"
     "Rules for each question type:\n"
     "1. MULTIPLE_CHOICE: Single-choice question. Select exactly one option_id and place it in the 'chosen' list.\n"
     "2. CHECKBOX: Multi-choice question. Select one or more option_ids and place them in the 'chosen' list.\n"
     "3. TEXT_REFLECT: Question with no options. Answer the question prompt thoughtfully and precisely "
-    "matching the question content. The response in the 'answer' field must be a high-quality, relevant response directly answering the prompt.\n\n"
+    "matching the question content. The response in the 'answer' field must be a high-quality, relevant response directly answering the prompt.\n"
+    "4. NUMERIC, TEXT_EXACT_MATCH, REGEX: Answer with the exact short value the question expects (a number, "
+    "a word, or a value matching the expected pattern), in the 'answer' field. Never repeat an answer listed "
+    "in 'previous_attempts' — it was already graded wrong.\n"
+    "5. PLAIN_TEXT: Short free-text answer, in the 'answer' field. Never repeat an answer listed in 'previous_attempts'.\n"
+    "6. FILE_UPLOAD: Question requiring a file or submission summary. Provide a concise, high-quality assignment submission response in the 'answer' field.\n"
+    "7. URL: Question requiring a project URL. Provide a relevant URL or GitHub repo link in the 'answer' field.\n\n"
     "IMPORTANT for CHECKBOX:\n"
     "If a question has 'previous_attempts', each entry records a prior submission of chosen option_ids:\n"
     "- 'response' is a list of option_ids that were chosen together.\n"
@@ -38,8 +45,17 @@ SYSTEM_PROMPT = (
 TYPE_LOOKUP = {
     "MULTIPLE_CHOICE": ("multipleChoiceResponse", "chosen"),
     "CHECKBOX": ("checkboxResponse", "chosen"),
-    "TEXT_REFLECT": ("textReflectResponse", "answer")
+    "TEXT_REFLECT": ("textReflectResponse", "answer"),
+    "NUMERIC": ("numericResponse", "answer"),
+    "PLAIN_TEXT": ("plainTextResponse", "plainText"),
+    "TEXT_EXACT_MATCH": ("textExactMatchResponse", "answer"),
+    "REGEX": ("regexResponse", "answer"),
+    "FILE_UPLOAD": ("fileUploadResponse", "fileUrl"),
+    "URL": ("urlResponse", "url"),
 }
+
+# Question types with a single free-text/numeric/file answer, no options — handled uniformly.
+TEXT_ANSWER_TYPES = {"TEXT_REFLECT", "NUMERIC", "PLAIN_TEXT", "TEXT_EXACT_MATCH", "REGEX", "FILE_UPLOAD", "URL"}
 
 
 class GradedSolver(object):
@@ -78,22 +94,70 @@ class GradedSolver(object):
             return response
 
     def _format_response(self, part_id: str, q_type: str, chosen: list = None, answer: str = None) -> dict:
-        response_key, val_key = TYPE_LOOKUP[q_type]
         if q_type == "MULTIPLE_CHOICE":
-            val = chosen[0] if chosen else None
-        elif q_type == "CHECKBOX":
-            val = chosen or []
-        else:
-            val = answer or None
-        return {
-            "questionId": part_id,
-            "questionType": q_type,
-            "questionResponse": {
-                response_key: {
-                    val_key: val
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    "multipleChoiceResponse": {
+                        "chosen": chosen[0] if chosen else None
+                    }
                 }
             }
-        }
+        elif q_type == "CHECKBOX":
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    "checkboxResponse": {
+                        "chosen": chosen or []
+                    }
+                }
+            }
+        elif q_type == "FILE_UPLOAD":
+            file_url = getattr(config, "FILE_UPLOAD_URL", "")
+            if not file_url:
+                if answer and (answer.startswith("http://") or answer.startswith("https://")):
+                    file_url = answer
+                else:
+                    file_url = "https://raw.githubusercontent.com/yamantaka-singh/skipera/main/README.md"
+            title = "submission.txt"
+            caption = answer or "Assignment Submission"
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    "fileUploadResponse": {
+                        "title": title,
+                        "caption": caption,
+                        "fileUrl": file_url
+                    }
+                }
+            }
+        elif q_type == "URL":
+            url_val = answer if (answer and (answer.startswith("http://") or answer.startswith("https://"))) else "https://github.com"
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    "urlResponse": {
+                        "title": "Project Submission",
+                        "caption": answer or "Submission URL",
+                        "url": url_val
+                    }
+                }
+            }
+        else:
+            response_key, val_key = TYPE_LOOKUP[q_type]
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    response_key: {
+                        val_key: answer or None
+                    }
+                }
+            }
 
     def solve(self) -> bool:
         # Overwrite minimum passing score
@@ -158,19 +222,19 @@ class GradedSolver(object):
                 q_type = q["Type"]
                 options = q.get("Options", [])
 
-                if q_type == "TEXT_REFLECT":
+                if q_type in TEXT_ANSWER_TYPES:
                     if q.get("correct_answer"):
                         answer_responses.append(self._format_response(
                             part_id=part_id,
-                            q_type="TEXT_REFLECT",
+                            q_type=q_type,
                             answer=q["correct_answer"]
                         ))
                     else:
-                        unsolved_questions[part_id] = {
-                            "Question": q["Question"],
-                            "Options": [],
-                            "Type": "TEXT_REFLECT"
-                        }
+                        entry = {"Question": q["Question"], "Options": [], "Type": q_type}
+                        wrong_attempts = q.get("wrong_attempts", [])
+                        if wrong_attempts:
+                            entry["previous_attempts"] = wrong_attempts
+                        unsolved_questions[part_id] = entry
                 elif q_type == "MULTIPLE_CHOICE":
                     known_correct_id = next((opt["option_id"] for opt in options if opt.get("correct") is True), None)
                     if known_correct_id:
@@ -238,6 +302,7 @@ class GradedSolver(object):
                             unsolved_questions[part_id]["previous_attempts"] = virtual_feedbacks
 
             if unsolved_questions:
+                self._last_unsolved_empty = False
                 connector = get_connector()
                 llm_result = connector.get_response(
                     unsolved_questions, system_prompt=SYSTEM_PROMPT, response_schema=DEFAULT_RESPONSE_SCHEMA)
@@ -249,6 +314,12 @@ class GradedSolver(object):
                         answer=ans.get("answer")
                     ))
             else:
+                if getattr(self, "_last_unsolved_empty", False):
+                    logger.error("Infinite loop detected: all supported questions are correct, but target grade not reached.")
+                    if self.discarded_questions:
+                        logger.error(f"This is likely because there are {len(self.discarded_questions)} unsupported question(s) in this assignment.")
+                    return False
+                self._last_unsolved_empty = True
                 logger.info(
                     "All questions already correct — resubmitting same answers.")
 
@@ -375,6 +446,9 @@ class GradedSolver(object):
             if "incorrect_combinations" in existing:
                 questions_formatted[part_id]["incorrect_combinations"] = existing["incorrect_combinations"]
 
+            if "wrong_attempts" in existing:
+                questions_formatted[part_id]["wrong_attempts"] = existing["wrong_attempts"]
+
         self.questions_data.update(questions_formatted)
 
         return questions_formatted
@@ -478,8 +552,17 @@ class GradedSolver(object):
 
         response_lookup = {}
         for resp in submitted_responses:
-            response_key, val_key = TYPE_LOOKUP[resp["questionType"]]
-            response_lookup[resp["questionId"]] = resp["questionResponse"][response_key][val_key]
+            q_t = resp["questionType"]
+            if q_t == "FILE_UPLOAD":
+                response_lookup[resp["questionId"]] = (
+                    resp["questionResponse"]["fileUploadResponse"].get("caption")
+                    or resp["questionResponse"]["fileUploadResponse"].get("fileUrl")
+                )
+            elif q_t == "URL":
+                response_lookup[resp["questionId"]] = resp["questionResponse"]["urlResponse"].get("url")
+            else:
+                response_key, val_key = TYPE_LOOKUP[q_t]
+                response_lookup[resp["questionId"]] = resp["questionResponse"][response_key][val_key]
 
         for part in feedback_parts:
             feedback_part_id = part.get("partId", "")
@@ -501,9 +584,15 @@ class GradedSolver(object):
             all_options = our_q.get("Options", [])
             question_type = our_q["Type"]
 
-            if question_type == "TEXT_REFLECT":
+            if question_type in TEXT_ANSWER_TYPES:
                 if correctness == "CORRECT":
                     our_q["correct_answer"] = submitted_chosen
+                elif correctness == "INCORRECT" and submitted_chosen:
+                    hint = (fb.get("feedback") or {}).get("cmlValue")
+                    our_q.setdefault("wrong_attempts", []).append({
+                        "answer": submitted_chosen,
+                        "hint": hint,
+                    })
                 continue
 
             is_single = question_type == "MULTIPLE_CHOICE"

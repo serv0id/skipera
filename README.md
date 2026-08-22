@@ -78,7 +78,7 @@ skipera introduction-psychology --llm
 | Perplexity | `perplexity_api_key` | `sonar-pro` |
 | OpenAI | `openai_api_key` | `gpt-4o` |
 | Anthropic | `anthropic_api_key` | `claude-3-5-sonnet-latest` |
-| Nvidia | `nvidia_api_key` | `meta/llama-3.1-70b-instruct` |
+| Nvidia | `nvidia_api_key` | `nvidia/nemotron-3.5-lightning-30b-a3b` |
 | Gemini | `gemini_api_key` | `gemini-3.1-flash-lite` |
 
 You can override the default model for any provider by setting the corresponding `*_model` key in the config (e.g. `"openai_model": "gpt-4.1-mini"`).

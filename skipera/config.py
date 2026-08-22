@@ -24,8 +24,9 @@ DEFAULT_CONFIG = {
     "nvidia_api_key": "",
     "anthropic_api_key": "",
     "openai_model": "gpt-4o",
-    "nvidia_model": "meta/llama-3.1-70b-instruct",
-    "anthropic_model": "claude-3-5-sonnet-latest"
+    "nvidia_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "anthropic_model": "claude-3-5-sonnet-latest",
+    "file_upload_url": ""
 }
 
 
@@ -97,6 +98,7 @@ COOKIES = _config["cookies"]
 _OVERRIDABLE = [
     "perplexity_api_key", "gemini_api_key", "openai_api_key", "nvidia_api_key", "anthropic_api_key",
     "perplexity_model", "gemini_model", "openai_model", "nvidia_model", "anthropic_model",
+    "file_upload_url",
 ]
 for _key in _OVERRIDABLE:
     globals()[_key.upper()] = os.getenv(_key.upper()) or _config.get(_key, DEFAULT_CONFIG.get(_key, ""))

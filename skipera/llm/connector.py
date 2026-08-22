@@ -10,7 +10,9 @@ from .. import config
 
 class ResponseFormat(BaseModel):
     question_id: str
-    question_type: Literal["MULTIPLE_CHOICE", "CHECKBOX", "TEXT_REFLECT"]
+    question_type: Literal["MULTIPLE_CHOICE", "CHECKBOX", "TEXT_REFLECT",
+                            "NUMERIC", "PLAIN_TEXT", "TEXT_EXACT_MATCH", "REGEX",
+                            "FILE_UPLOAD", "URL"]
     chosen: Optional[List[str]] = None
     answer: Optional[str] = None
 

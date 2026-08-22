@@ -108,14 +108,16 @@ function formatResponse(partId, qType, chosen = null, answer = null) {
 
 import { updateDashboard } from './dashboardStore.js';
 
-export async function triggerQuizSolver(courseId, itemId, settings, tabId) {
-  const updateProgress = (msg) => {
-    let type = "info";
-    if (msg.includes("ERROR") || msg.includes("Failed") || msg.includes("Error")) type = "error";
-    else if (msg.includes("Complete") || msg.includes("successfully") || msg.includes("Passed")) type = "complete";
-    else if (msg.includes("Starting") || msg.includes("Processing") || msg.includes("Triggering")) type = "active";
-    
-    updateDashboard(msg, type);
+export async function triggerQuizSolver(courseId, itemId, settings, tabId, courseSlug = "default", runContext = null) {
+  const safeSlug = courseSlug || "default";
+  const updateProgress = (msg, overrideType) => {
+    let type = overrideType || "info";
+    if (!overrideType) {
+      if (msg.includes("ERROR") || msg.includes("Failed") || msg.includes("Error")) type = "error";
+      else if (msg.includes("Complete") || msg.includes("successfully") || msg.includes("Passed")) type = "complete";
+      else if (msg.includes("Starting") || msg.includes("Processing") || msg.includes("Triggering")) type = "active";
+    }
+    updateDashboard(msg, type, safeSlug);
   };
   
   updateProgress(`Starting quiz solver for courseId: ${courseId}, itemId: ${itemId}`);
@@ -130,6 +132,10 @@ export async function triggerQuizSolver(courseId, itemId, settings, tabId) {
   let questionsData = {}; 
 
   while (attemptsMade < maxAttempts) {
+    if (runContext?.isCancelled) {
+      updateProgress("Quiz solver cancelled (tab closed).", "error");
+      return;
+    }
     // 1. Get State
     const stateRes = await fetchGraphQL("QueryState", GET_STATE_QUERY, { courseId, itemId });
     const submissionState = stateRes.data.SubmissionState.queryState;

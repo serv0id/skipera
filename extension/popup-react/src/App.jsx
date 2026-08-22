@@ -45,36 +45,63 @@ export default function App() {
   const [theme, setTheme] = useState('theme-earth'); // Default theme
   const [showDashboard, setShowDashboard] = useState(false);
   const [completionRate, setCompletionRate] = useState(0);
+  const [courseSlug, setCourseSlug] = useState('');
 
   useEffect(() => {
     // Apply theme to document html element so CSS variables propagate correctly
     document.documentElement.className = theme;
   }, [theme]);
 
+  // 1. Detect current course from active tab
+  useEffect(() => {
+    if (window.chrome && chrome.tabs) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs[0]?.url) {
+          try {
+            const urlObj = new URL(tabs[0].url);
+            const urlParts = urlObj.pathname.split('/');
+            const learnIdx = urlParts.indexOf('learn');
+            if (learnIdx !== -1 && urlParts[learnIdx + 1]) {
+              const slug = urlParts[learnIdx + 1];
+              setCourseSlug(slug);
+            }
+          } catch (e) {
+            console.warn("Could not parse tab URL", e);
+          }
+        }
+      });
+    }
+  }, []);
+
+  // 2. Load settings and course-specific completion rate
   useEffect(() => {
     if (window.chrome && chrome.storage) {
-      chrome.storage.local.get(['apiKey', 'provider', 'modelName', 'theme'], (result) => {
+      chrome.storage.local.get(['apiKey', 'provider', 'modelName', 'theme', 'dashboardStates'], (result) => {
         if (result.apiKey) setApiKey(result.apiKey);
         if (result.theme) setTheme(result.theme);
         if (result.provider) {
           setProvider(result.provider);
           setModelName(result.modelName || defaultModels[result.provider]);
         }
-      });
-      
-      chrome.storage.local.get(["dashboardState"], (res) => {
-        if (res.dashboardState) setCompletionRate(res.dashboardState.completionRate || 0);
+        if (courseSlug && result.dashboardStates?.[courseSlug]) {
+          setCompletionRate(result.dashboardStates[courseSlug].completionRate || 0);
+        } else if (!courseSlug) {
+          setCompletionRate(0);
+        }
       });
 
       const messageListener = (msg) => {
-        if (msg.action === "DASHBOARD_UPDATE" && msg.state) {
-          setCompletionRate(msg.state.completionRate || 0);
+        if (msg.action === "DASHBOARD_UPDATE") {
+          const currentSlug = courseSlug || "default";
+          if (!msg.slug || msg.slug === currentSlug) {
+            setCompletionRate(msg.state?.completionRate || 0);
+          }
         }
       };
       chrome.runtime.onMessage.addListener(messageListener);
       return () => chrome.runtime.onMessage.removeListener(messageListener);
     }
-  }, []);
+  }, [courseSlug]);
 
   useEffect(() => {
     if (window.chrome && chrome.storage) {
@@ -207,7 +234,7 @@ export default function App() {
       {/* Dashboard Overlay */}
       <AnimatePresence>
         {showDashboard && (
-          <Dashboard onClose={() => setShowDashboard(false)} />
+          <Dashboard courseSlug={courseSlug} onClose={() => setShowDashboard(false)} />
         )}
       </AnimatePresence>
 

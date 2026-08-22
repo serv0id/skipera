@@ -4,38 +4,63 @@ import { callLLMProvider } from './llmProviders.js';
 
 import { updateDashboard } from './dashboardStore.js';
 
-let isRunning = false;
+export const activeRuns = new Map(); // tabId -> { courseSlug, isCancelled: false }
+
+export function stopRunForTab(tabId) {
+  if (!tabId) return;
+  const run = activeRuns.get(tabId);
+  if (run) {
+    run.isCancelled = true;
+    updateDashboard("Process terminated (Tab was closed).", "error", run.courseSlug);
+    activeRuns.delete(tabId);
+    console.log(`[Skipera] Run terminated for tab ${tabId} (${run.courseSlug})`);
+  }
+}
 
 export async function runFullCourse(courseSlug, settings, tabId) {
-  if (isRunning) return { status: "Already running" };
-  isRunning = true;
+  const safeSlug = courseSlug || "default";
   
-  const updateProgress = (msg) => {
-    let type = "info";
-    if (msg.includes("Skipping") || msg.includes("No unlocked")) type = "skip";
-    else if (msg.includes("ERROR") || msg.includes("Failed") || msg.includes("Error")) type = "error";
-    else if (msg.includes("Complete") || msg.includes("successfully")) type = "complete";
-    else if (msg.includes("Starting") || msg.includes("Processing") || msg.includes("Triggering")) type = "active";
-    
-    updateDashboard(msg, type);
+  if (tabId && activeRuns.has(tabId) && !activeRuns.get(tabId).isCancelled) {
+    return { status: "Already running for this tab" };
+  }
+  
+  const runContext = { courseSlug: safeSlug, isCancelled: false };
+  if (tabId) {
+    activeRuns.set(tabId, runContext);
+  }
+  
+  const updateProgress = (msg, overrideType) => {
+    let type = overrideType || "info";
+    if (!overrideType) {
+      if (msg.includes("Skipping") || msg.includes("No unlocked")) type = "skip";
+      else if (msg.includes("ERROR") || msg.includes("Failed") || msg.includes("Error")) type = "error";
+      else if (msg.includes("Complete") || msg.includes("successfully") || msg.includes("Passed")) type = "complete";
+      else if (msg.includes("Starting") || msg.includes("Processing") || msg.includes("Triggering")) type = "active";
+    }
+    updateDashboard(msg, type, safeSlug);
   };
   
   try {
     const userId = await getUserId();
     if (!userId) throw new Error("Could not fetch User ID. Are you logged in?");
     
-    updateProgress(`Starting run for course: ${courseSlug}`);
-    const initialMaterials = await getCourseMaterials(courseSlug);
+    updateProgress(`Starting run for course: ${safeSlug}`);
+    const initialMaterials = await getCourseMaterials(safeSlug);
     const courseId = initialMaterials.elements[0].id;
     
     // We will loop continuously until we find no more uncompleted items
     let loopCount = 0;
     const skippedItems = new Set();
     
-    while (isRunning && loopCount < 100) {
+    while (loopCount < 100) {
+      if (tabId && runContext.isCancelled) {
+        updateProgress("Process terminated (tab closed).", "error");
+        break;
+      }
+      
       loopCount++;
       const completedIds = await getCompletedItems(userId, courseId);
-      const materials = await getCourseMaterials(courseSlug);
+      const materials = await getCourseMaterials(safeSlug);
       
       const uncompleted = [];
       const items = materials.linked["onDemandCourseMaterialItems.v2"] || [];
@@ -48,11 +73,11 @@ export async function runFullCourse(courseSlug, settings, tabId) {
       
       if (items.length > 0) {
         const rate = Math.floor((completedIds.size / items.length) * 100);
-        updateDashboard(rate, "completionRate");
+        updateDashboard(rate, "completionRate", safeSlug);
       }
       updateProgress(`Found ${uncompleted.length} uncompleted items.`);
       if (uncompleted.length === 0) {
-        updateProgress("Course Complete!");
+        updateProgress("Course Complete!", "complete");
         break;
       }
       
@@ -61,6 +86,7 @@ export async function runFullCourse(courseSlug, settings, tabId) {
       let allLocked = uncompleted.length > 0;
       
       for (const item of uncompleted) {
+        if (tabId && runContext.isCancelled) break;
         if (item.isLocked) continue;
         allLocked = false;
         
@@ -69,45 +95,49 @@ export async function runFullCourse(courseSlug, settings, tabId) {
         try {
           if (item.contentSummary.typeName === "lecture") {
             const meta = await getVideoMetadata(courseId, item.id);
-            await watchVideo(userId, courseSlug, courseId, item, meta);
-            updateProgress(`Completed lecture: ${item.name}`);
+            await watchVideo(userId, safeSlug, courseId, item, meta);
+            updateProgress(`Completed lecture: ${item.name}`, "complete");
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "supplement") {
             await readSupplement(userId, courseId, item.id);
-            updateProgress(`Completed supplement: ${item.name}`);
+            updateProgress(`Completed supplement: ${item.name}`, "complete");
             processedAny = true;
             break;
           } else if (["plugin", "notebook"].includes(item.contentSummary.typeName)) {
-            updateProgress(`Skipping unsupported assignment: ${item.name} (${item.contentSummary.typeName})`);
+            updateProgress(`Skipping unsupported assignment: ${item.name} (${item.contentSummary.typeName})`, "skip");
             skippedItems.add(item.id);
             processedAny = true;
             break;
           } else if (["exam", "quiz", "assignment", "closedAssessment", "phasedPeer", "gradedPeer", "programming", "gradedProgramming", "staffGraded", "ungradedAssignment"].includes(item.contentSummary.typeName)) {
             updateProgress(`Triggering quiz solver for ${item.name}`);
-            await triggerQuizSolver(courseId, item.id, settings, tabId);
-            updateProgress(`Completed quiz item: ${item.name}`);
+            await triggerQuizSolver(courseId, item.id, settings, tabId, safeSlug, runContext);
+            updateProgress(`Completed quiz item: ${item.name}`, "complete");
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "widget" || item.contentSummary.typeName === "gradedWidget" || item.contentSummary.typeName === "ungradedWidget") {
             await completeWidget(userId, courseId, item.id);
-            updateProgress(`Completed widget: ${item.name}`);
+            updateProgress(`Completed widget: ${item.name}`, "complete");
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "lti" || item.contentSummary.typeName === "gradedLti" || item.contentSummary.typeName === "ungradedLti") {
             await completeLti(userId, courseId, item.id);
-            updateProgress(`Completed LTI item: ${item.name}`);
+            updateProgress(`Completed LTI item: ${item.name}`, "complete");
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "discussionPrompt") {
             await solveDiscussion(courseId, item.id, settings, tabId);
-            updateProgress(`Completed discussion: ${item.name}`);
+            updateProgress(`Completed discussion: ${item.name}`, "complete");
             processedAny = true;
             break;
           }
         } catch (e) {
-          updateProgress(`Failed to process item ${item.name}: ${e.message}`);
+          updateProgress(`Failed to process item ${item.name}: ${e.message}`, "error");
         }
+      }
+      
+      if (tabId && runContext.isCancelled) {
+        break;
       }
       
       if (!processedAny) {
@@ -125,11 +155,11 @@ export async function runFullCourse(courseSlug, settings, tabId) {
     }
   } catch (err) {
     console.error(err);
-    isRunning = false;
+    if (tabId) activeRuns.delete(tabId);
     throw err;
   }
   
-  isRunning = false;
+  if (tabId) activeRuns.delete(tabId);
   return { status: "Finished" };
 }
 

@@ -1,7 +1,12 @@
 // background.js
-import { runFullCourse } from './solverOrchestrator.js';
+import { runFullCourse, stopRunForTab } from './solverOrchestrator.js';
 import { triggerQuizSolver } from './quizSolver.js';
 import { getCourseMaterials } from './courseraApi.js';
+
+// Terminate running processes when tab is closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  stopRunForTab(tabId);
+});
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "NVIDIA_API_CALL") {
@@ -12,17 +17,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === "RUN_FULL_COURSE") {
-    runFullCourse(request.slug, request.settings, sender.tab?.id)
+    const tabId = sender.tab?.id;
+    runFullCourse(request.slug, request.settings, tabId)
       .then(data => sendResponse(data))
       .catch(error => sendResponse({ status: "Error", error: error.message }));
     return true; // Keep channel open
   }
 
   if (request.action === "RUN_SINGLE_QUIZ") {
+    const tabId = sender.tab?.id;
     getCourseMaterials(request.slug)
       .then(materials => {
         const courseId = materials.elements[0].id;
-        return triggerQuizSolver(courseId, request.itemId, request.settings, sender.tab?.id);
+        return triggerQuizSolver(courseId, request.itemId, request.settings, tabId, request.slug);
       })
       .then(() => sendResponse({ status: "Quiz solver finished." }))
       .catch(error => sendResponse({ status: "Error", error: error.message }));

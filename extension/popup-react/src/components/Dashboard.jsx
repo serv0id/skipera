@@ -54,20 +54,23 @@ const LogItem = ({ log }) => {
   );
 };
 
-export default function Dashboard({ onClose }) {
+export default function Dashboard({ courseSlug, onClose }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   
   const terminalRef = useRef(null);
+  const safeSlug = courseSlug || "default";
 
   useEffect(() => {
-    // 1. Fetch initial state
-    chrome.storage.local.get(["dashboardState"], (res) => {
-      if (res.dashboardState) {
-        setData(res.dashboardState);
+    // 1. Fetch initial state for THIS course
+    chrome.storage.local.get(["dashboardStates"], (res) => {
+      const courseState = res.dashboardStates?.[safeSlug];
+      if (courseState) {
+        setData(courseState);
       } else {
         setData({
+          courseSlug: safeSlug,
           completionRate: 0,
           activeTask: { title: "Idle", timeElapsed: "00:00" },
           completedTasks: [],
@@ -79,10 +82,12 @@ export default function Dashboard({ onClose }) {
       setLoading(false);
     });
 
-    // 2. Listen for live updates
+    // 2. Listen for live updates for THIS course
     const messageListener = (msg) => {
-      if (msg.action === "DASHBOARD_UPDATE" && msg.state) {
-        setData(msg.state);
+      if (msg.action === "DASHBOARD_UPDATE") {
+        if (!msg.slug || msg.slug === safeSlug) {
+          setData(msg.state);
+        }
       }
     };
     chrome.runtime.onMessage.addListener(messageListener);
@@ -90,7 +95,7 @@ export default function Dashboard({ onClose }) {
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
     };
-  }, []);
+  }, [safeSlug]);
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -119,10 +124,17 @@ export default function Dashboard({ onClose }) {
       className="absolute inset-0 z-50 bg-background/90 backdrop-blur-xl overflow-hidden p-3 flex flex-col gap-3 border-t border-border/50 origin-bottom"
     >
       <div className="flex justify-between items-center shrink-0">
-        <h2 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2">
-          <Terminal size={18} className="text-primary" />
-          Execution Dashboard
-        </h2>
+        <div className="flex items-center gap-2 overflow-hidden">
+          <h2 className="text-lg font-bold tracking-tight text-foreground flex items-center gap-2 shrink-0">
+            <Terminal size={18} className="text-primary" />
+            Dashboard
+          </h2>
+          {courseSlug && (
+            <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-primary/10 text-primary truncate max-w-[170px]" title={courseSlug}>
+              {courseSlug}
+            </span>
+          )}
+        </div>
         <button 
           onClick={onClose}
           className="p-1.5 rounded-full hover:bg-black/10 text-foreground transition-colors cursor-pointer"

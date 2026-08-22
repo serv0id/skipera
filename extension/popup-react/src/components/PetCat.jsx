@@ -13,7 +13,12 @@ const LAZY_PHRASES = [
   "100% on the quiz? You're welcome."
 ];
 
-// Oneko sprite offsets (32x32 grid)
+// Oneko sprite offsets (32x32 grid — verified against actual sprite sheet)
+// NOTE: This sprite sheet has E/W and diagonals mirrored vs the standard reference.
+// col=3 (bg-pos -96px) = cat running LEFT = runW
+// col=4 (bg-pos -128px) = cat running RIGHT = runE
+// col=0 (bg-pos 0px) = NW diagonal (not NE)
+// col=1 (bg-pos -32px) = NE diagonal (not NW)
 const SPRITE_STATES = {
   idle: [[-3, -3]],
   alert: [[-7, -3]],
@@ -24,14 +29,14 @@ const SPRITE_STATES = {
   scratchWallW: [[-4, 0], [-4, -1]],
   tired: [[-3, -2]],
   sleep: [[-2, 0], [-2, -1]],
-  runN: [[0, -2], [0, -3]],
-  runNE: [[-1, -2], [-1, -3]],
-  runE: [[-4, -2], [-4, -3]],
-  runSE: [[-5, -1], [-5, -2]],
-  runS: [[-5, -3], [-6, -1]],
-  runSW: [[-3, 0], [-3, -1]],
-  runW: [[-4, 0], [-4, -1]],
-  runNW: [[-1, 0], [-1, -1]]
+  runN:  [[-1, -2], [-1, -3]],
+  runNE: [[-1, 0],  [-1, -1]],   // was NW in reference — actual NE in this sheet
+  runE:  [[-4, -2], [-4, -3]],   // was W in reference  — actual E  in this sheet
+  runSE: [[-5, -3], [-6, -1]],   // was SW in reference — actual SE in this sheet
+  runS:  [[-6, -3], [-7, -2]],
+  runSW: [[-5, -1], [-5, -2]],   // was SE in reference — actual SW in this sheet
+  runW:  [[-3, 0],  [-3, -1]],   // was E  in reference — actual W  in this sheet
+  runNW: [[0, -2],  [0, -3]],    // was NE in reference — actual NW in this sheet
 };
 
 export default function PetCat() {
@@ -151,11 +156,32 @@ export default function PetCat() {
       if (dialogue) {
         state.current = 'alert';
       } else if (isMouseRecent && distToMouse > 35) {
-        // Chase mouse!
+        // Chase mouse with potential-field obstacle avoidance
         state.current = 'chase';
         const angle = Math.atan2(dy, dx);
-        const forceX = Math.cos(angle) * CHASE_FORCE;
-        const forceY = Math.sin(angle) * CHASE_FORCE;
+        let forceX = Math.cos(angle) * CHASE_FORCE;
+        let forceY = Math.sin(angle) * CHASE_FORCE;
+
+        // Repulsion from nearby static obstacle bodies
+        // ponytail: naive potential field, no guarantees in tight concave pockets
+        const REPEL_RADIUS = 48;
+        const REPEL_STRENGTH = CHASE_FORCE * 3.5;
+        for (const obs of obstaclesRef.current) {
+          if (!obs.isStatic) continue;
+          // Closest point on AABB to cat
+          const b = obs.bounds;
+          const cx = Math.max(b.min.x, Math.min(cat.position.x, b.max.x));
+          const cy = Math.max(b.min.y, Math.min(cat.position.y, b.max.y));
+          const ex = cat.position.x - cx;
+          const ey = cat.position.y - cy;
+          const dist = Math.sqrt(ex * ex + ey * ey) || 0.1;
+          if (dist < REPEL_RADIUS) {
+            const strength = REPEL_STRENGTH * (1 - dist / REPEL_RADIUS);
+            forceX += (ex / dist) * strength;
+            forceY += (ey / dist) * strength;
+          }
+        }
+
         Matter.Body.applyForce(cat, cat.position, { x: forceX, y: forceY });
       } else if (isMouseRecent && distToMouse <= 35) {
         // Arrived at mouse -> sit & scratch
@@ -227,9 +253,13 @@ export default function PetCat() {
         } else if (state.current === 'scratch') {
           visualState = 'scratchSelf';
         } else if (state.current === 'walk' || state.current === 'chase') {
-          if (speed > 0.15) {
-            const angle = Math.atan2(cat.velocity.y, cat.velocity.x);
-            const octant = Math.round(8 * angle / (2 * Math.PI) + 8) % 8;
+          let moveAngle = Math.atan2(cat.velocity.y, cat.velocity.x);
+          if (state.current === 'chase' && isMouseRecent) {
+            moveAngle = Math.atan2(dy, dx);
+          }
+
+          if (speed > 0.05 || (state.current === 'chase' && distToMouse > 25)) {
+            const octant = Math.round(8 * moveAngle / (2 * Math.PI) + 8) % 8;
             const dirs = ['runE', 'runSE', 'runS', 'runSW', 'runW', 'runNW', 'runN', 'runNE'];
             visualState = dirs[octant];
           } else {

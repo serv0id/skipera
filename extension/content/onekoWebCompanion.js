@@ -41,7 +41,7 @@
   let posY = 120;
   let targetX = 120;
   let targetY = 120;
-  let speed = 10;
+  let speed = 5; // Halved speed for gentle & smooth movement
   let state = "idle";
   let stateTimer = 0;
   let frameIndex = 0;

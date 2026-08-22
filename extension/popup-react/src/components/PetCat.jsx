@@ -43,9 +43,9 @@ export default function PetCat() {
   // Constants
   const CAT_SIZE = 32;
   const CAT_RADIUS = 16;
-  const WANDER_FORCE = 0.00006;
-  const CHASE_FORCE = 0.00015;
-  const MAX_SPEED = 2.2;
+  const WANDER_FORCE = 0.00003;
+  const CHASE_FORCE = 0.000075;
+  const MAX_SPEED = 1.1;
 
   // Matter.js references
   const engineRef = useRef(null);

@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Legacy aliases for safe transition */
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary-hover: var(--secondary-hover);
+  --color-accent-hover: var(--accent-hover);
+  --color-surface: var(--card);
+  --color-text-main: var(--foreground);
+  --color-text-muted: var(--muted-foreground);
+}
+
+:root {
+  /* Earth Theme (Default) - Built on the 13-token ui-ux-design contract */
+  --background: #F7EAE0;
+  --foreground: #1D4533;
+  --card: rgba(255, 255, 255, 0.65);
+  --card-foreground: #1D4533;
+  --popover: #FFFFFF;
+  --popover-foreground: #1D4533;
+  --primary: #1D4533;
+  --primary-foreground: #F7EAE0;
+  --secondary: #F9D2BA;
+  --secondary-foreground: #5E3122;
+  --muted: #EADCD0;
+  --muted-foreground: #5E3122;
+  --accent: #5E3122;
+  --accent-foreground: #F7EAE0;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(94, 49, 34, 0.15); /* #5E3122 at 15% */
+  --input: rgba(94, 49, 34, 0.2);
+  --ring: #1D4533;
+
+  /* Aliases for interaction states */
+  --primary-hover: #153225;
+  --secondary-hover: #EADCD0;
+  --accent-hover: #48261a;
+}
+
+.theme-fire {
+  /* Fire Theme - Built on the 13-token ui-ux-design contract */
+  --background: #EED9B9;
+  --foreground: #5E0006;
+  --card: rgba(255, 255, 255, 0.55);
+  --card-foreground: #5E0006;
+  --popover: #FDF6ED;
+  --popover-foreground: #5E0006;
+  --primary: #5E0006;
+  --primary-foreground: #EED9B9;
+  --secondary: #D53E0F;
+  --secondary-foreground: #FFFFFF;
+  --muted: #E2CAAA;
+  --muted-foreground: #9B0F06;
+  --accent: #9B0F06;
+  --accent-foreground: #EED9B9;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(155, 15, 6, 0.15); /* #9B0F06 at 15% */
+  --input: rgba(155, 15, 6, 0.2);
+  --ring: #5E0006;
+
+  /* Aliases for interaction states */
+  --primary-hover: #420004;
+  --secondary-hover: #b3340d;
+  --accent-hover: #7a0c05;
+}
+
+.theme-sage {
+  /* Sage Theme */
+  --background: #F7F1DE;
+  --foreground: #4E220F;
+  --card: rgba(255, 255, 255, 0.65);
+  --card-foreground: #4E220F;
+  --popover: #FFFFFF;
+  --popover-foreground: #4E220F;
+  --primary: #4E220F;
+  --primary-foreground: #F7F1DE;
+  --secondary: #9D6638;
+  --secondary-foreground: #FFFFFF;
+  --muted: #E6DFCC;
+  --muted-foreground: #9D6638;
+  --accent: #B0BA99;
+  --accent-foreground: #4E220F;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(157, 102, 56, 0.2);
+  --input: rgba(157, 102, 56, 0.25);
+  --ring: #4E220F;
+
+  /* Aliases for interaction states */
+  --primary-hover: #38180b;
+  --secondary-hover: #b87a46;
+  --accent-hover: #9ca686;
+}
+
+html, body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: "Outfit", sans-serif;
+  min-width: 340px;
+  min-height: 400px;
+  margin: 0;
+  padding: 0;
+}
+
+/* View Transitions for Custom Animations */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+/* Allow natural stacking for our custom opacity/transform animations */

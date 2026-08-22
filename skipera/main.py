@@ -167,7 +167,8 @@ class Skipera(object):
             success = self.read_item(item_id)
         elif item_type in {"ungradedAssignment", "staffGraded"} and self.llm:
             success = GradedSolver(
-                self.session, self.course_id, item_id).solve()
+                self.session, self.course_id, item_id, course_name=self.course, item_name=item.get("name", "")
+            ).solve()
         elif item_type == "discussionPrompt" and self.llm:
             success = DiscussionPromptSolver(
                 self.session, self.user_id, self.course_id, item_id).solve()

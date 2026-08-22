@@ -1,18 +1,32 @@
 import json
 import sys
+import os
 from pathlib import Path
 
 from loguru import logger
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 CONFIG_DIR = Path.home() / ".skipera"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULT_CONFIG = {
     "cookies": {},
-    "perplexity_api_key": "",
-    "gemini_api_key": "",
+    "perplexity_api_key": [],
+    "gemini_api_key": [],
     "perplexity_model": "sonar-pro",
-    "gemini_model": "gemini-3.1-flash-lite"
+    "gemini_model": "gemini-3.1-flash-lite",
+    "openai_api_key": [],
+    "nvidia_api_key": [],
+    "anthropic_api_key": [],
+    "openai_model": "gpt-4o",
+    "nvidia_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "anthropic_model": "claude-3-5-sonnet-latest",
+    "file_upload_url": ""
 }
 
 
@@ -74,13 +88,26 @@ _config = load_config()
 BASE_URL = "https://www.coursera.org/api/"
 GRAPHQL_URL = "https://www.coursera.org/graphql-gateway"
 PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions"
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 # User-configurable
 COOKIES = _config["cookies"]
-PERPLEXITY_API_KEY = _config.get("perplexity_api_key", "")
-GEMINI_API_KEY = _config.get("gemini_api_key", "")
-PERPLEXITY_MODEL = _config.get("perplexity_model", "sonar-pro")
-GEMINI_MODEL = _config.get("gemini_model", "gemini-3.1-flash-lite")
+
+_OVERRIDABLE = [
+    "perplexity_api_key", "gemini_api_key", "openai_api_key", "nvidia_api_key", "anthropic_api_key",
+    "perplexity_model", "gemini_model", "openai_model", "nvidia_model", "anthropic_model",
+    "file_upload_url",
+]
+for _key in _OVERRIDABLE:
+    val = os.getenv(_key.upper()) or _config.get(_key, DEFAULT_CONFIG.get(_key, ""))
+    if _key.endswith("_api_key"):
+        if isinstance(val, str):
+            val = [k.strip() for k in val.split(",") if k.strip()]
+        elif not isinstance(val, list):
+            val = []
+    globals()[_key.upper()] = val
 
 HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',

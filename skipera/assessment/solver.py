@@ -162,6 +162,8 @@ class GradedSolver(object):
     def solve(self) -> bool:
         # Overwrite minimum passing score
         target_grade = 0.8
+        max_attempts = 3
+        attempts_made = 0
 
         while True:
             state = self.get_state()
@@ -350,6 +352,11 @@ class GradedSolver(object):
                 if earned_grade >= target_grade:
                     logger.success("Passed!")
                     return True
+
+            attempts_made += 1
+            if attempts_made >= max_attempts:
+                logger.error(f"Failed to reach target grade after {max_attempts} attempts. Aborting to prevent infinite loop.")
+                return False
 
             random_delay()
 

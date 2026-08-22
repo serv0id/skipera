@@ -297,8 +297,38 @@ export default function App() {
     }
   };
 
+  const [mouseTrail, setMouseTrail] = useState({ x: -100, y: -100 });
+
+  const handlePointerMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMouseTrail({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+  };
+
   return (
-    <div className="flex flex-col min-h-screen relative overflow-hidden p-4 md:p-8 w-full max-w-5xl mx-auto">
+    <div 
+      onPointerMove={handlePointerMove}
+      className="flex flex-col min-h-screen relative overflow-hidden p-4 md:p-8 w-full max-w-5xl mx-auto select-none group"
+    >
+      {/* Dynamic Cursor Illumination Spotlight & Laser Glow */}
+      <div 
+        className="pointer-events-none absolute -inset-px transition-opacity duration-300 opacity-70"
+        style={{
+          background: `radial-gradient(400px circle at ${mouseTrail.x}px ${mouseTrail.y}px, var(--color-primary) 0%, transparent 80%)`,
+          opacity: 0.12,
+          mixBlendMode: 'screen'
+        }}
+      />
+      <div 
+        className="pointer-events-none absolute w-3 h-3 rounded-full bg-primary/40 blur-[2px] transition-transform duration-75 ease-out"
+        style={{
+          transform: `translate3d(${mouseTrail.x - 6}px, ${mouseTrail.y - 6}px, 0)`,
+          boxShadow: '0 0 12px var(--color-primary)'
+        }}
+      />
+
       {/* Dashboard Overlay */}
       <AnimatePresence>
         {showDashboard && (

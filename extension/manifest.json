@@ -20,7 +20,8 @@
         "content/content.css"
       ],
       "js": [
-        "content/content.js"
+        "content/content.js",
+        "content/onekoWebCompanion.js"
       ]
     }
   ],
@@ -37,5 +38,15 @@
     "https://api.openai.com/*",
     "https://api.anthropic.com/*",
     "https://generativelanguage.googleapis.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "popup/oneko.gif"
+      ],
+      "matches": [
+        "*://*.coursera.org/*"
+      ]
+    }
   ]
 }

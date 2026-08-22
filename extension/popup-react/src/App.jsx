@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './components/Button';
 import { AuthorCard } from './components/AuthorCard';
 import PetCat from './components/PetCat';
+import Dashboard from './components/Dashboard';
 
 const modelOptions = {
   nvidia: [
@@ -42,6 +43,8 @@ export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [status, setStatus] = useState({ text: 'Ready', state: 'idle' });
   const [theme, setTheme] = useState('theme-earth'); // Default theme
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [completionRate, setCompletionRate] = useState(0);
 
   useEffect(() => {
     // Apply theme to document html element so CSS variables propagate correctly
@@ -58,6 +61,18 @@ export default function App() {
           setModelName(result.modelName || defaultModels[result.provider]);
         }
       });
+      
+      chrome.storage.local.get(["dashboardState"], (res) => {
+        if (res.dashboardState) setCompletionRate(res.dashboardState.completionRate || 0);
+      });
+
+      const messageListener = (msg) => {
+        if (msg.action === "DASHBOARD_UPDATE" && msg.state) {
+          setCompletionRate(msg.state.completionRate || 0);
+        }
+      };
+      chrome.runtime.onMessage.addListener(messageListener);
+      return () => chrome.runtime.onMessage.removeListener(messageListener);
     }
   }, []);
 
@@ -161,6 +176,7 @@ export default function App() {
       return;
     }
     
+    setShowDashboard(true);
     setStatus({ text: "Connecting to Coursera...", state: "working" });
     
     if (window.chrome && chrome.tabs) {
@@ -188,26 +204,22 @@ export default function App() {
 
   return (
     <div className="flex flex-col min-h-screen relative overflow-hidden p-4 md:p-8 w-full max-w-5xl mx-auto">
+      {/* Dashboard Overlay */}
+      <AnimatePresence>
+        {showDashboard && (
+          <Dashboard onClose={() => setShowDashboard(false)} />
+        )}
+      </AnimatePresence>
+
       <PetCat />
       {/* Soft background blobs */}
       <div className="absolute top-[-20%] left-[-20%] w-[60%] h-[50%] bg-accent rounded-full blur-[60px] opacity-40 mix-blend-multiply pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[70%] h-[60%] bg-primary rounded-full blur-[80px] opacity-10 mix-blend-multiply pointer-events-none" />
 
-      {/* Theme Toggle Button */}
-      <motion.button
-        onClick={toggleTheme}
-        whileHover={{ scale: 1.1, rotate: 15 }}
-        whileTap={{ scale: 0.9 }}
-        className="absolute top-4 right-4 z-20 w-8 h-8 flex items-center justify-center rounded-full bg-surface shadow-sm border border-secondary/10 text-primary hover:bg-surface/80 transition-colors cursor-pointer"
-        title="Toggle Theme"
-      >
-        <Palette size={16} />
-      </motion.button>
-
       <main className="relative z-10 flex flex-col flex-1 mt-6 md:mt-10 gap-6 md:grid md:grid-cols-12 md:items-start">
         
         {/* Header */}
-        <header className="flex flex-col items-center justify-center md:items-start md:col-span-12 mb-2 md:mb-6">
+        <header className="flex items-center justify-between md:col-span-12 mb-2 md:mb-6">
           <motion.div 
             className="flex items-center gap-2.5"
             initial={{ y: -10, opacity: 0 }}
@@ -229,6 +241,34 @@ export default function App() {
               <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-0.5">Next-Gen Solver</span>
             </div>
           </motion.div>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setShowDashboard(true)}
+              className="relative w-9 h-9 rounded-full bg-primary/5 hover:bg-primary/10 text-primary flex items-center justify-center transition-colors cursor-pointer"
+              title="View Dashboard"
+            >
+              <svg className="w-full h-full transform -rotate-90 absolute inset-0" viewBox="0 0 36 36">
+                <circle cx="18" cy="18" r="16" fill="none" className="stroke-primary/20" strokeWidth="2.5" />
+                <circle 
+                  cx="18" cy="18" r="16" 
+                  fill="none" 
+                  className="stroke-primary transition-all duration-500 ease-out" 
+                  strokeWidth="2.5" 
+                  strokeDasharray="100.53" 
+                  strokeDashoffset={100.53 - (100.53 * completionRate) / 100} 
+                  strokeLinecap="round" 
+                />
+              </svg>
+              <span className="text-[9px] font-bold z-10 select-none">{completionRate}%</span>
+            </button>
+            <button 
+              onClick={toggleTheme}
+              className="p-2 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-colors cursor-pointer"
+              title="Toggle Theme"
+            >
+              <Palette size={20} />
+            </button>
+          </div>
         </header>
 
         {/* Form Container */}

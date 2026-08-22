@@ -72,41 +72,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     
     return true;
-  } else if (request.action === "UPDATE_PROGRESS") {
-    showToast(request.message);
-    sendResponse({ status: "OK" });
-    return true;
   }
   return true;
 });
-
-// Toast UI Logic
-let toastContainer = null;
-
-function showToast(message) {
-  if (!toastContainer) {
-    toastContainer = document.createElement('div');
-    toastContainer.id = "skipera-toast-container";
-    document.body.appendChild(toastContainer);
-  }
-  
-  const toast = document.createElement('div');
-  toast.className = "skipera-toast";
-  toast.textContent = message;
-  
-  toastContainer.appendChild(toast);
-  
-  // Animate in
-  setTimeout(() => toast.classList.add('show'), 10);
-  
-  // Remove after 5 seconds
-  setTimeout(() => {
-    toast.classList.remove('show');
-    setTimeout(() => {
-      if (toast.parentNode === toastContainer) {
-        toastContainer.removeChild(toast);
-      }
-    }, 300);
-  }, 5000);
-}
-

@@ -106,12 +106,16 @@ function formatResponse(partId, qType, chosen = null, answer = null) {
   }
 }
 
+import { updateDashboard } from './dashboardStore.js';
+
 export async function triggerQuizSolver(courseId, itemId, settings, tabId) {
   const updateProgress = (msg) => {
-    if (tabId) {
-      chrome.tabs.sendMessage(tabId, { action: "UPDATE_PROGRESS", message: msg }).catch(() => {});
-    }
-    console.log(msg);
+    let type = "info";
+    if (msg.includes("ERROR") || msg.includes("Failed") || msg.includes("Error")) type = "error";
+    else if (msg.includes("Complete") || msg.includes("successfully") || msg.includes("Passed")) type = "complete";
+    else if (msg.includes("Starting") || msg.includes("Processing") || msg.includes("Triggering")) type = "active";
+    
+    updateDashboard(msg, type);
   };
   
   updateProgress(`Starting quiz solver for courseId: ${courseId}, itemId: ${itemId}`);
@@ -170,6 +174,10 @@ export async function triggerQuizSolver(courseId, itemId, settings, tabId) {
     };
     
     for (const part of parts) {
+      if (part.__typename === "Submission_TextBlock") {
+        continue;
+      }
+
       const qTypeStr = QTYPE_MAP[part.__typename];
       if (!qTypeStr) {
         throw new Error(`Unsupported question type encountered: ${part.__typename}`);

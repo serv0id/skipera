@@ -2,6 +2,8 @@ import { getUserId, getCourseMaterials, getCompletedItems, getVideoMetadata, wat
 import { triggerQuizSolver } from './quizSolver.js';
 import { callLLMProvider } from './llmProviders.js';
 
+import { updateDashboard } from './dashboardStore.js';
+
 let isRunning = false;
 
 export async function runFullCourse(courseSlug, settings, tabId) {
@@ -9,10 +11,13 @@ export async function runFullCourse(courseSlug, settings, tabId) {
   isRunning = true;
   
   const updateProgress = (msg) => {
-    if (tabId) {
-      chrome.tabs.sendMessage(tabId, { action: "UPDATE_PROGRESS", message: msg }).catch(() => {});
-    }
-    console.log(msg);
+    let type = "info";
+    if (msg.includes("Skipping") || msg.includes("No unlocked")) type = "skip";
+    else if (msg.includes("ERROR") || msg.includes("Failed") || msg.includes("Error")) type = "error";
+    else if (msg.includes("Complete") || msg.includes("successfully")) type = "complete";
+    else if (msg.includes("Starting") || msg.includes("Processing") || msg.includes("Triggering")) type = "active";
+    
+    updateDashboard(msg, type);
   };
   
   try {
@@ -41,6 +46,10 @@ export async function runFullCourse(courseSlug, settings, tabId) {
         }
       }
       
+      if (items.length > 0) {
+        const rate = Math.floor((completedIds.size / items.length) * 100);
+        updateDashboard(rate, "completionRate");
+      }
       updateProgress(`Found ${uncompleted.length} uncompleted items.`);
       if (uncompleted.length === 0) {
         updateProgress("Course Complete!");
@@ -61,10 +70,12 @@ export async function runFullCourse(courseSlug, settings, tabId) {
           if (item.contentSummary.typeName === "lecture") {
             const meta = await getVideoMetadata(courseId, item.id);
             await watchVideo(userId, courseSlug, courseId, item, meta);
+            updateProgress(`Completed lecture: ${item.name}`);
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "supplement") {
             await readSupplement(userId, courseId, item.id);
+            updateProgress(`Completed supplement: ${item.name}`);
             processedAny = true;
             break;
           } else if (["plugin", "notebook"].includes(item.contentSummary.typeName)) {
@@ -75,18 +86,22 @@ export async function runFullCourse(courseSlug, settings, tabId) {
           } else if (["exam", "quiz", "assignment", "closedAssessment", "phasedPeer", "gradedPeer", "programming", "gradedProgramming", "staffGraded", "ungradedAssignment"].includes(item.contentSummary.typeName)) {
             updateProgress(`Triggering quiz solver for ${item.name}`);
             await triggerQuizSolver(courseId, item.id, settings, tabId);
+            updateProgress(`Completed quiz item: ${item.name}`);
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "widget" || item.contentSummary.typeName === "gradedWidget" || item.contentSummary.typeName === "ungradedWidget") {
             await completeWidget(userId, courseId, item.id);
+            updateProgress(`Completed widget: ${item.name}`);
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "lti" || item.contentSummary.typeName === "gradedLti" || item.contentSummary.typeName === "ungradedLti") {
             await completeLti(userId, courseId, item.id);
+            updateProgress(`Completed LTI item: ${item.name}`);
             processedAny = true;
             break;
           } else if (item.contentSummary.typeName === "discussionPrompt") {
             await solveDiscussion(courseId, item.id, settings, tabId);
+            updateProgress(`Completed discussion: ${item.name}`);
             processedAny = true;
             break;
           }

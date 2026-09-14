@@ -1,4 +1,4 @@
-function parseJsonText(text) {
+export function parseJsonText(text) {
   if (!text) return { responses: [] };
   if (typeof text !== "string") return text;
   let cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -10,15 +10,42 @@ function parseJsonText(text) {
   try {
     return JSON.parse(cleaned);
   } catch (e) {
-    console.warn("[Skipera LLM] JSON parse failed, trying regex extraction:", text);
-    const match = text.match(/\{[\s\S]*"responses"[\s\S]*\}/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch (inner) {}
+    console.warn("[Skipera LLM] JSON parse failed, salvaging individual responses:", text);
+    const salvaged = salvageResponses(text);
+    if (salvaged.length > 0) {
+      console.warn(`[Skipera LLM] Salvaged ${salvaged.length} response object(s) from malformed JSON.`);
+      return { responses: salvaged };
     }
     throw e;
   }
+}
+
+// Long generations occasionally corrupt a single object (a duplicated key, a stray
+// token). Parsing the array as a whole then costs every answer in the batch, so
+// split on the object delimiter and parse each independently — one bad object
+// costs one answer, and the caller's re-ask fills that gap.
+// ponytail: splits on `},{` rather than tracking brace depth, because a corrupt
+// object desyncs quote state and swallows everything after it. Literal `},{`
+// inside a reasoning string would mis-split; hasn't been seen, and a mis-split
+// chunk just fails to parse and gets dropped like any other bad object.
+function salvageResponses(text) {
+  const key = text.indexOf('"responses"');
+  if (key === -1) return [];
+  const arrStart = text.indexOf("[", key);
+  const arrEnd = text.lastIndexOf("]");
+  if (arrStart === -1 || arrEnd <= arrStart) return [];
+
+  const out = [];
+  for (let chunk of text.slice(arrStart + 1, arrEnd).split(/\}\s*,\s*\{/)) {
+    chunk = chunk.trim();
+    if (!chunk.startsWith("{")) chunk = "{" + chunk;
+    if (!chunk.endsWith("}")) chunk += "}";
+    try {
+      const obj = JSON.parse(chunk);
+      if (obj && obj.question_id != null) out.push(obj);
+    } catch (inner) { /* drop just this object */ }
+  }
+  return out;
 }
 
 const PROVIDER_CONFIGS = {

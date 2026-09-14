@@ -19,11 +19,13 @@ async function fetchGraphQL(opname, query, variables) {
   });
   if (!res.ok) {
      const text = await res.text();
+     console.error(`[Skipera Solver] GraphQL ${opname} -> ${res.status}:`, text); // full body, untruncated
      throw new Error(`GraphQL API returned ${res.status}: ${text.substring(0, 100)}...`);
   }
   const contentType = res.headers.get("content-type");
   if (!contentType || !contentType.includes("application/json")) {
      const text = await res.text();
+     console.error(`[Skipera Solver] GraphQL ${opname} unexpected content-type ${contentType}:`, text);
      throw new Error(`Expected JSON but got ${contentType}: ${text.substring(0, 100)}...`);
   }
   const data = await res.json();
@@ -62,7 +64,7 @@ export async function triggerQuizSolver(courseId, itemId, settings, tabId, cours
   try {
   
   let targetGrade = (typeof settings?.targetGrade === "number" && settings.targetGrade > 0) ? settings.targetGrade : 0.8;
-  let maxAttempts = 3;
+  let maxAttempts = 2; // give up and let the orchestrator skip this item after 2 failed attempts
   let attemptsMade = 0;
   
   // Local cache for correctness
@@ -90,9 +92,13 @@ export async function triggerQuizSolver(courseId, itemId, settings, tabId, cours
       continue;
     } else if (allowed === "RESUME_DRAFT") {
       updateProgress("Resuming draft.");
-    } else if (allowed === null) {
+    } else {
+      // Catch-all, not just `allowed === null`: any other value (undefined, an
+      // unrecognized enum) means there's no draft to resume either, and falling
+      // through to `inProgressAttempt.id` below crashes with "Cannot read
+      // properties of null" instead of the real "no attempts left" story.
       if (submissionState.outcome?.isPassed) return;
-      throw new Error("No more attempts remaining.");
+      throw new Error(`No more attempts remaining (allowedAction: ${JSON.stringify(allowed)}).`);
     }
 
     // 2. Retrieve Questions
@@ -268,7 +274,19 @@ function resolveQuestionId(ansQId, domainQuestions, responseIndex) {
           }
         };
 
-        ingest(await callLLM(domainQuestions, settings, groupData.agent.buildPrompt(domainQuestions, reflection), moduleContext), domainQuestions);
+        // Swallow the throw: an unparseable response must not skip the re-ask below
+        // (it used to escape this whole function, so every question in the batch got
+        // blanked and "after retry" in the warning was a lie).
+        const tryCall = async (questions) => {
+          try {
+            return await callLLM(questions, settings, groupData.agent.buildPrompt(questions, reflection), moduleContext);
+          } catch (e) {
+            console.error(`[Skipera Solver] LLM call failed for domain ${domain}:`, e?.message || e);
+            return null;
+          }
+        };
+
+        ingest(await tryCall(domainQuestions), domainQuestions);
 
         // Re-ask ONCE for anything the model skipped / truncated / mis-labelled.
         const missingIds = Object.keys(domainQuestions).filter(id => !covered.has(id));
@@ -276,7 +294,7 @@ function resolveQuestionId(ansQId, domainQuestions, responseIndex) {
           console.warn(`[Skipera Solver] Domain ${domain}: ${missingIds.length}/${Object.keys(domainQuestions).length} unanswered, re-asking.`);
           const subset = {};
           for (const id of missingIds) subset[id] = domainQuestions[id];
-          ingest(await callLLM(subset, settings, groupData.agent.buildPrompt(subset, reflection), moduleContext), subset);
+          ingest(await tryCall(subset), subset);
         }
         return domainResponses;
       });
@@ -299,8 +317,18 @@ function resolveQuestionId(ansQId, domainQuestions, responseIndex) {
       if (qTypeStr && !answeredIds.has(partId)) {
         updateProgress(`WARN: no answer for a ${qTypeStr} question after retry — submitting blank`, "error");
         const agent = getAgentForType(qTypeStr);
+        // Coursera's SaveResponses rejects both a missing field AND a literal empty
+        // string/undefined choice with a 400 that aborts the WHOLE mutation (every
+        // question in the item, not just this one) — so the "blank" fallback must
+        // still be a valid, non-empty payload. MC/CHECKBOX need a real option id
+        // (using [] leaves chosen[0] === undefined, which JSON.stringify drops).
+        // null (not []) when there's no option to fall back to: MULTIPLE_CHOICE's
+        // `chosen ? chosen[0] : null` treats [] as truthy, so chosen[0] would be
+        // undefined -> JSON.stringify drops the key -> same 400 this is fixing.
+        const fallbackOptions = questionsData[partId]?.Options || [];
+        const fallbackChosen = fallbackOptions.length ? [fallbackOptions[0].original_id] : null;
         try {
-          answerResponses.push(agent.formatPayload(partId, qTypeStr, [], ""));
+          answerResponses.push(agent.formatPayload(partId, qTypeStr, fallbackChosen, "N/A"));
         } catch (e) {
           console.error(`Could not format blank payload for ${partId}:`, e);
         }
@@ -324,6 +352,16 @@ function resolveQuestionId(ansQId, domainQuestions, responseIndex) {
     await fetchGraphQL("Submission_SubmitLatestDraft", SUBMIT_DRAFT_QUERY, {
       input: { courseId, itemId, submissionId: draftId }
     });
+
+    // Coursera namespaces part ids by gradability: `autoGradableResponseId~...` vs
+    // `submissionResponseId~...`. With none of the former, a human grades this, so
+    // there is no score to wait for — polling just reads 0% ("awaiting grading"),
+    // fails the target-grade check, and burns attempts re-submitting the same essay
+    // while feeding ungraded feedback into wrong_attempts.
+    if (!parts.some(p => String(p.partId || "").startsWith("autoGradableResponseId"))) {
+      updateProgress("Submitted for manual grading — no auto-graded questions, so no score to wait for.", "complete");
+      return;
+    }
 
     // 5. Wait & Get Feedback. Coursera's grader lags the submit; a fixed 5s wait
     // read an ungraded response ("2-3%") and poisoned questionsData with all-WRONG

@@ -76,7 +76,12 @@ export class LogicAgent extends BaseAgent {
   }
 
   postProcess(ansType, chosen, answer, domainQuestions, qId) {
-    if (["CHECKBOX", "CHECKBOX_REFLECT"].includes(ansType) && typeof chosen === 'string') {
+    // MUST match the type list on the mapping block below (and MC's fuzzy-match
+    // just after it) — those both require Array.isArray(chosen) and silently
+    // no-op otherwise. A bare string here used to skip both, leaving formatPayload
+    // to do `chosen[0]`, which on a *string* grabs its first CHARACTER (e.g.
+    // "opt_1" -> "o") instead of erroring: an unmapped, guaranteed-wrong option id.
+    if (["MULTIPLE_CHOICE", "CHECKBOX", "CHECKBOX_REFLECT"].includes(ansType) && typeof chosen === 'string') {
       chosen = [chosen];
     }
 
@@ -96,6 +101,14 @@ export class LogicAgent extends BaseAgent {
       let mappedChosen = [];
       for (let c of chosen) {
         let optObj = qOpts.find(o => o.option_id === c);
+        // Our option ids are "opt_1", "opt_2"... but the model sometimes echoes just
+        // the bare number ("2") despite being given the full id. That "2" never
+        // matches an option_id, falls through to the `else` below unmapped, and gets
+        // submitted to Coursera as a literal garbage answer ("2" isn't any real
+        // option's id) -> guaranteed wrong, with no error to show for it.
+        if (!optObj && /^\d+$/.test(String(c))) {
+          optObj = qOpts.find(o => o.option_id === `opt_${c}`);
+        }
         if (optObj && optObj.original_id) {
           mappedChosen.push(optObj.original_id);
         } else {
@@ -325,10 +338,28 @@ export class TextAgent extends BaseAgent {
         questionResponse: { textExactMatchResponse: { answer: answer || "" } }
       };
     } else if (qType === "RICH_TEXT") {
+      // Submission_RichTextInput has two optional object branches (the server named
+      // both types): `cml: CmlContentInput` and `html: Submission_HtmlContentInput`.
+      // The html branch is ACCEPTED but graded as an empty submission — the page
+      // renders html while the grading pipeline reads cml, so a cml-less submission
+      // scores 0 with "Your submission is currently empty". CML is the native
+      // format, so write that; cmlValue/dtdId are CmlContentInput's fields (they
+      // were rejected earlier only because they sat one level too shallow).
+      const text = String(answer || "N/A")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       return {
         questionId: partId,
         questionType: qType,
-        questionResponse: { richTextResponse: { richText: { value: answer || "" } } }
+        questionResponse: {
+          richTextResponse: {
+            richText: {
+              cml: {
+                cmlValue: `<co-content><text>${text}</text></co-content>`,
+                dtdId: "assess/1"
+              }
+            }
+          }
+        }
       };
     }
     throw new Error(`Unsupported text question type: ${qType}`);

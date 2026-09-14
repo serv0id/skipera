@@ -130,3 +130,6 @@ dmypy.json
 # local network capture (contains session tokens)
 peer-assignment.har
 *.har
+
+# graphify build output (regenerate with `graphify .`)
+graphify-out/

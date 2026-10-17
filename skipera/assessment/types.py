@@ -33,7 +33,7 @@ QUESTION_TYPE_MAP = {
 
 
 class Submission_CodeInput(BaseModel):
-    code: Optional[str] = None
+    code: Literal[""]
 
 
 class Submission_CheckboxQuestion(BaseModel):
@@ -51,7 +51,7 @@ class Submission_FileUploadQuestion(BaseModel):
 
 
 class Submission_MathQuestion(BaseModel):
-    answer: Optional[str] = None
+    answer: Literal[""]
 
 
 class Submission_MultipleChoiceQuestion(BaseModel):
@@ -80,11 +80,11 @@ class Submission_PlainTextQuestion(BaseModel):
 
 
 class Submission_RegexQuestion(BaseModel):
-    answer: Optional[str] = None
+    answer: Literal[""]
 
 
 class Submission_HtmlContentInput(BaseModel):
-    value: Optional[str] = None
+    value: Literal[""]
 
 
 class Submission_RichTextInput(BaseModel):
@@ -96,7 +96,7 @@ class Submission_RichTextQuestion(BaseModel):
 
 
 class Submission_TextExactMatchQuestion(BaseModel):
-    answer: Optional[str] = None
+    answer: Literal[""]
 
 
 class Submission_TextReflectQuestion(BaseModel):

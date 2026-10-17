@@ -126,5 +126,5 @@ venv.bak/
 dmypy.json
 
 # Pyre type checker
-.pyre/
-
+# Local generated files
+output.list

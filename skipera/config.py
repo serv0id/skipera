@@ -23,7 +23,7 @@ DEFAULT_CONFIG = {
     "groq_api_key": "",
     "perplexity_model": "sonar-pro",
     "gemini_model": "gemini-3.1-flash-lite",
-    "groq_model": "llama-3.3-70b-versatile"
+    "groq_model": "openai/gpt-oss-120b"
 }
 
 
@@ -151,11 +151,13 @@ if env_keys:
 # Ensure primary key is included
 if GROQ_API_KEY and GROQ_API_KEY not in GROQ_API_KEYS:
     GROQ_API_KEYS.insert(0, GROQ_API_KEY)
+elif not GROQ_API_KEY and GROQ_API_KEYS:
+    GROQ_API_KEY = GROQ_API_KEYS[0]
 PERPLEXITY_MODEL = _config.get("perplexity_model", "sonar-pro")
 GEMINI_MODEL = _config.get("gemini_model", "gemini-3.1-flash-lite")
-GROQ_MODEL = _config.get("groq_model", "llama-3.3-70b-versatile")
-if GROQ_MODEL == "llama-3.1-8b-instant":
-    GROQ_MODEL = "llama-3.3-70b-versatile" # auto-upgrade for existing configs
+GROQ_MODEL = _config.get("groq_model", "openai/gpt-oss-120b")
+if GROQ_MODEL in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile"):
+    GROQ_MODEL = "openai/gpt-oss-120b" # auto-upgrade for deprecated models
 
 HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',

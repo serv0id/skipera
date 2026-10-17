@@ -5,7 +5,7 @@ import httpx
 from loguru import logger
 
 from .. import config
-from ..llm.connector import GeminiConnector, PerplexityConnector, GroqConnector, GroqConnector
+from ..llm.connector import GeminiConnector, PerplexityConnector, GroqConnector
 from ..session_utils import get_csrf_headers, random_delay
 
 
@@ -56,9 +56,30 @@ class DiscussionPromptSolver(object):
             logger.error("Could not retrieve discussion prompt.")
             return False
 
-        connector = self.get_connector()
-        answer = connector.get_response(self.format_llm_prompt(
-            prompt), system_prompt=SYSTEM_PROMPT)
+        llm_prompt = self.format_llm_prompt(prompt)
+        answer = None
+
+        if config.PERPLEXITY_API_KEY:
+            connector = PerplexityConnector()
+            answer = connector.get_response(llm_prompt, system_prompt=SYSTEM_PROMPT)
+        elif config.GEMINI_API_KEY:
+            connector = GeminiConnector()
+            answer = connector.get_response(llm_prompt, system_prompt=SYSTEM_PROMPT)
+        elif getattr(config, "GROQ_API_KEYS", []):
+            for key in config.GROQ_API_KEYS:
+                try:
+                    connector = GroqConnector(api_key=key)
+                    answer = connector.get_response(llm_prompt, system_prompt=SYSTEM_PROMPT)
+                    break
+                except Exception as e:
+                    logger.warning(f"Groq key failed ({key[:4]}...): {e}")
+            else:
+                raise RuntimeError("All Groq API keys exhausted.")
+        elif config.GROQ_API_KEY:
+            connector = GroqConnector()
+            answer = connector.get_response(llm_prompt, system_prompt=SYSTEM_PROMPT)
+        else:
+            raise RuntimeError("No API Key specified.")
 
         if self.submit_answer(prompt["courseForumQuestionId"], self.to_cml(answer)):
             logger.success("Discussion prompt answered.")
@@ -72,6 +93,8 @@ class DiscussionPromptSolver(object):
             return PerplexityConnector()
         if config.GEMINI_API_KEY:
             return GeminiConnector()
+        if getattr(config, "GROQ_API_KEYS", []):
+            return GroqConnector(api_key=config.GROQ_API_KEYS[0])
         if config.GROQ_API_KEY:
             return GroqConnector()
         raise RuntimeError("No API Key specified.")

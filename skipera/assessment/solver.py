@@ -20,13 +20,12 @@ SYSTEM_PROMPT = (
     "The questions are in a dict format where each key represents the question id, and the value is a JSON dict containing:\n"
     "- 'Question': the question text (which might have HTML tags, ignore them).\n"
     "- 'Options': a list of options (for MULTIPLE_CHOICE and CHECKBOX types) with option_id and value.\n"
-    "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', or 'TEXT_REFLECT'.\n"
+    "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', 'TEXT_REFLECT', 'RICH_TEXT', or 'PLAIN_TEXT'.\n"
     "- 'previous_attempts': (optional, only for CHECKBOX) past attempt results.\n\n"
     "Rules for each question type:\n"
     "1. MULTIPLE_CHOICE: Single-choice question. Select exactly one option_id and place it in the 'chosen' list. (CRITICAL: You MUST use the exact 'option_id' hash string, do NOT use indices like '1' or '2'!).\n"
     "2. CHECKBOX: Multi-choice question. Select one or more option_ids and place them in the 'chosen' list. (CRITICAL: You MUST use the exact 'option_id' hash strings!).\n"
-    "3. TEXT_REFLECT: Question with no options. Answer the question prompt thoughtfully and precisely "
-    "matching the question content. The response in the 'answer' field must be a high-quality, relevant response directly answering the prompt.\n\n"
+    "3. TEXT_REFLECT, RICH_TEXT, PLAIN_TEXT: Open-ended questions with no options. Answer the question prompt thoroughly, thoughtfully, and precisely matching all requirements and guidelines specified in the prompt (e.g., word count, required points, terminology). The response in the 'answer' field must be a high-quality, comprehensive response directly satisfying all criteria in the prompt.\n\n"
     "IMPORTANT for CHECKBOX:\n"
     "If a question has 'previous_attempts', each entry records a prior submission of chosen option_ids:\n"
     "- 'response' is a list of option_ids that were chosen together.\n"
@@ -38,7 +37,9 @@ SYSTEM_PROMPT = (
 TYPE_LOOKUP = {
     "MULTIPLE_CHOICE": ("multipleChoiceResponse", "chosen"),
     "CHECKBOX": ("checkboxResponse", "chosen"),
-    "TEXT_REFLECT": ("textReflectResponse", "answer")
+    "TEXT_REFLECT": ("textReflectResponse", "answer"),
+    "PLAIN_TEXT": ("plainTextResponse", "plainText"),
+    "RICH_TEXT": ("richTextResponse", "richText")
 }
 
 
@@ -78,25 +79,82 @@ class GradedSolver(object):
             return response
 
     def _format_response(self, part_id: str, q_type: str, chosen: list = None, answer: str = None) -> dict:
-        response_key, val_key = TYPE_LOOKUP[q_type]
         if chosen and isinstance(chosen, str):
             chosen = [chosen]
             
         if q_type == "MULTIPLE_CHOICE":
             val = chosen[0] if chosen else None
-        elif q_type == "CHECKBOX":
-            val = chosen or []
-        else:
-            val = answer or None
-        return {
-            "questionId": part_id,
-            "questionType": q_type,
-            "questionResponse": {
-                response_key: {
-                    val_key: val
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    "multipleChoiceResponse": {
+                        "chosen": val
+                    }
                 }
             }
-        }
+        elif q_type == "CHECKBOX":
+            val = chosen or []
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    "checkboxResponse": {
+                        "chosen": val
+                    }
+                }
+            }
+        elif q_type == "RICH_TEXT":
+            val = answer or ""
+            if not val.strip().startswith("<"):
+                paragraphs = "".join(f"<p>{p.strip()}</p>" for p in val.split("\n\n") if p.strip())
+                val = paragraphs or f"<p>{val}</p>"
+            return {
+                "questionId": part_id,
+                "questionType": "RICH_TEXT",
+                "questionResponse": {
+                    "richTextResponse": {
+                        "richText": {
+                            "html": {
+                                "value": val
+                            }
+                        }
+                    }
+                }
+            }
+        elif q_type == "PLAIN_TEXT":
+            val = answer or ""
+            return {
+                "questionId": part_id,
+                "questionType": "PLAIN_TEXT",
+                "questionResponse": {
+                    "plainTextResponse": {
+                        "plainText": val
+                    }
+                }
+            }
+        elif q_type == "TEXT_REFLECT":
+            val = answer or ""
+            return {
+                "questionId": part_id,
+                "questionType": "TEXT_REFLECT",
+                "questionResponse": {
+                    "textReflectResponse": {
+                        "answer": val
+                    }
+                }
+            }
+        else:
+            response_key, val_key = TYPE_LOOKUP.get(q_type, (f"{q_type.lower()}Response", "answer"))
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    response_key: {
+                        val_key: answer
+                    }
+                }
+            }
 
     def solve(self) -> bool:
         # Overwrite minimum passing score
@@ -105,8 +163,8 @@ class GradedSolver(object):
         while True:
             state = self.get_state()
 
-            if state.get("outcome") and state["outcome"].get("isPassed") and state["outcome"].get("earnedGrade", 0) >= target_grade:
-                logger.success("Already passed with target grade!")
+            if state.get("outcome") and state["outcome"].get("isPassed"):
+                logger.success("Already passed!")
                 return True
 
             allowed = state["allowedAction"]
@@ -161,18 +219,18 @@ class GradedSolver(object):
                 q_type = q["Type"]
                 options = q.get("Options", [])
 
-                if q_type == "TEXT_REFLECT":
+                if q_type in {"TEXT_REFLECT", "RICH_TEXT", "PLAIN_TEXT"}:
                     if q.get("correct_answer"):
                         answer_responses.append(self._format_response(
                             part_id=part_id,
-                            q_type="TEXT_REFLECT",
+                            q_type=q_type,
                             answer=q["correct_answer"]
                         ))
                     else:
                         unsolved_questions[part_id] = {
                             "Question": q["Question"],
                             "Options": [],
-                            "Type": "TEXT_REFLECT"
+                            "Type": q_type
                         }
                 elif q_type == "MULTIPLE_CHOICE":
                     known_correct_id = next((opt["option_id"] for opt in options if opt.get("correct") is True), None)
@@ -294,22 +352,22 @@ class GradedSolver(object):
                 return False
 
             time.sleep(5.0)
-            feedback_result = self.get_feedback()
+            feedback_result = self.get_feedback(max_retries=8)
             if feedback_result:
-                outcome = feedback_result["outcome"]
+                outcome = feedback_result.get("outcome") or {}
                 latest_score = outcome.get("latestScore", 0)
                 max_score = outcome.get("maxScore", 1)
                 earned_grade = latest_score / max_score if max_score else 0
 
                 self._update_data_from_feedback(
-                    feedback_result["parts"], answer_responses)
+                    feedback_result.get("parts", []), answer_responses)
                 self._save_data()
 
                 logger.info(
                     f"Earned grade: {earned_grade:.1%} | Target grade: {target_grade:.1%}"
                 )
 
-                if earned_grade >= target_grade:
+                if outcome.get("isPassed") or earned_grade >= target_grade:
                     logger.success("Passed!")
                     return True
 
@@ -465,7 +523,7 @@ class GradedSolver(object):
 
         return "Submission_SubmitLatestDraftSuccess" in res.text
 
-    def get_feedback(self, max_retries: int = 3) -> dict | None:
+    def get_feedback(self, max_retries: int = 8) -> dict | None:
         """
         Fetches AssignmentFeedback for per-question correctness.
         """
@@ -494,6 +552,7 @@ class GradedSolver(object):
 
             logger.warning(
                 f"Feedback not ready yet (attempt {i + 1}/{max_retries})")
+            time.sleep(3.0)
             random_delay()
 
         logger.warning("Feedback did not become available in time.")
@@ -511,8 +570,21 @@ class GradedSolver(object):
 
         response_lookup = {}
         for resp in submitted_responses:
-            response_key, val_key = TYPE_LOOKUP[resp["questionType"]]
-            response_lookup[resp["questionId"]] = resp["questionResponse"][response_key][val_key]
+            q_type = resp["questionType"]
+            if q_type == "RICH_TEXT":
+                try:
+                    response_lookup[resp["questionId"]] = resp["questionResponse"]["richTextResponse"]["richText"]["html"]["value"]
+                except (KeyError, TypeError):
+                    response_lookup[resp["questionId"]] = ""
+            elif q_type == "PLAIN_TEXT":
+                try:
+                    response_lookup[resp["questionId"]] = resp["questionResponse"]["plainTextResponse"]["plainText"]
+                except (KeyError, TypeError):
+                    response_lookup[resp["questionId"]] = ""
+            else:
+                response_key, val_key = TYPE_LOOKUP.get(q_type, ("", ""))
+                if response_key and val_key:
+                    response_lookup[resp["questionId"]] = resp["questionResponse"][response_key][val_key]
 
         for part in feedback_parts:
             feedback_part_id = part.get("partId", "")
@@ -534,8 +606,8 @@ class GradedSolver(object):
             all_options = our_q.get("Options", [])
             question_type = our_q["Type"]
 
-            if question_type == "TEXT_REFLECT":
-                if correctness == "CORRECT":
+            if question_type in {"TEXT_REFLECT", "RICH_TEXT", "PLAIN_TEXT"}:
+                if correctness == "CORRECT" or not correctness:
                     our_q["correct_answer"] = submitted_chosen
                 continue
 

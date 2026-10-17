@@ -12,7 +12,7 @@ from loguru import logger
 
 class ResponseFormat(BaseModel):
     question_id: str
-    question_type: Literal["MULTIPLE_CHOICE", "CHECKBOX", "TEXT_REFLECT"]
+    question_type: Literal["MULTIPLE_CHOICE", "CHECKBOX", "TEXT_REFLECT", "RICH_TEXT", "PLAIN_TEXT"]
     chosen: Optional[List[str]] = None
     answer: Optional[str] = None
 
@@ -91,9 +91,14 @@ class GroqConnector(object):
             payload["response_format"] = {"type": "json_object"}
             payload["messages"][0]["content"] += f"\n\nYou MUST return a JSON object that adheres to the following JSON schema:\n{json.dumps(response_schema)}"
 
-        response = httpx.post(url=self.API_URL, headers={
+        resp = httpx.post(url=self.API_URL, headers={
             "Authorization": f"Bearer {self.API_KEY}"
-        }, json=payload, timeout=60.0, verify=False).json()
+        }, json=payload, timeout=60.0, verify=False)
+        response = resp.json()
+
+        if "error" in response:
+            error_msg = response["error"].get("message", "Unknown error")
+            raise RuntimeError(f"Groq API Error ({resp.status_code}): {error_msg}")
 
         content = response["choices"][0]["message"]["content"]
         if response_schema is not None:
@@ -162,6 +167,7 @@ def test_llm_setup() -> None:
         
     logger.info(f"Testing {len(groq_keys)} Groq API keys to ensure at least one is working...")
     working_key_found = False
+    last_error = None
     for key in groq_keys:
         try:
             conn = GroqConnector(api_key=key)
@@ -170,10 +176,11 @@ def test_llm_setup() -> None:
             logger.success(f"Groq API key {key[:5]}... is working!")
             break 
         except Exception as e:
+            last_error = e
             logger.debug(f"Groq API key {key[:5]}... failed test: {e}")
             
     if not working_key_found:
-        logger.error("All provided Groq API keys failed (likely rate-limited or invalid). Please try again later or provide a new key.")
+        logger.error(f"All provided Groq API keys failed ({last_error}). Please try again later or provide a new key.")
         raise SystemExit(1)
         
     # We do NOT overwrite config.GROQ_API_KEYS here.

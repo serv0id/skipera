@@ -1,8 +1,14 @@
 # webpack:///static/__generated__/graphql-types.ts
 from pydantic import BaseModel
-from typing import List, Optional, Any, Literal, get_origin
+from typing import List, Optional, Any, Literal, get_origin, Union
 
-WHITELISTED_QUESTION_TYPES = ["Submission_CheckboxQuestion", "Submission_MultipleChoiceQuestion", "Submission_TextReflectQuestion"]
+WHITELISTED_QUESTION_TYPES = [
+    "Submission_CheckboxQuestion",
+    "Submission_MultipleChoiceQuestion",
+    "Submission_TextReflectQuestion",
+    "Submission_RichTextQuestion",
+    "Submission_PlainTextQuestion"
+]
 
 
 QUESTION_TYPE_MAP = {
@@ -77,8 +83,12 @@ class Submission_RegexQuestion(BaseModel):
     answer: Optional[str] = None
 
 
-class Submission_RichTextInput(BaseModel):
+class Submission_HtmlContentInput(BaseModel):
     value: Optional[str] = None
+
+
+class Submission_RichTextInput(BaseModel):
+    html: Optional[Submission_HtmlContentInput] = None
 
 
 class Submission_RichTextQuestion(BaseModel):
@@ -121,19 +131,25 @@ MODEL_MAP = {
 }
 
 
-# Bad recursive function
 def deep_blank_model(model_cls):
     data = {}
     for name, field in model_cls.model_fields.items():
         annotation = field.annotation
 
-        if get_origin(annotation) is Literal:
+        origin = get_origin(annotation)
+        if origin is Literal:
             literal_values = annotation.__args__
             data[name] = literal_values[0]
             continue
 
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            data[name] = deep_blank_model(annotation)
+        target_cls = annotation
+        if origin is Union or str(origin) == "typing.Union":
+            args = [a for a in annotation.__args__ if a is not type(None)]
+            if len(args) == 1:
+                target_cls = args[0]
+
+        if isinstance(target_cls, type) and issubclass(target_cls, BaseModel):
+            data[name] = deep_blank_model(target_cls)
         else:
             data[name] = None
 

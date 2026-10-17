@@ -63,6 +63,10 @@ class Skipera(object):
         self.course_id = r["elements"][0]["id"]
         all_items = r["linked"]["onDemandCourseMaterialItems.v2"]
 
+        self.graded_assignment_groups = {}
+        for param in r.get("linked", {}).get("onDemandGradingParameters.v1", []):
+            self.graded_assignment_groups.update(param.get("gradedAssignmentGroups", {}))
+
         logger.info("Course ID: " + self.course_id)
         logger.info("Number of Modules: " +
                     str(len(r["linked"]["onDemandCourseMaterialModules.v1"])))
@@ -208,11 +212,22 @@ class Skipera(object):
             return set()
 
         items = elements[0].get("items", {})
-        return {
+        completed = {
             item_id
             for item_id, progress in items.items()
             if progress.get("progressState") == "Completed"
         }
+
+        group_progress = elements[0].get("gradedAssignmentGroupProgress", {})
+        for group_id, grp_prog in group_progress.items():
+            grp_info = getattr(self, "graded_assignment_groups", {}).get(group_id, {})
+            grp_items = grp_info.get("itemIds", [])
+            num_required = grp_info.get("gradingType", {}).get("definition", {}).get("numberOfSelectedItems", 0)
+            if grp_prog.get("state") == "Completed" or (num_required > 0 and len([i for i in grp_items if i in completed]) >= num_required):
+                for alt_id in grp_items:
+                    completed.add(alt_id)
+
+        return completed
 
     def get_video_metadata(self, item_id: str) -> dict:
         r = self.session.get(self.base_url + f"onDemandLectureVideos.v1/{self.course_id}~{item_id}", params={
@@ -302,7 +317,10 @@ def list_enrolled_courses() -> None:
     user_id = elements[0].get("userId") if elements else None
     
     if not courses or not user_id:
-        logger.info("No enrolled courses found.")
+        msg = "No enrolled courses found."
+        logger.info(msg)
+        with open("output.list", "w", encoding="utf-8") as f:
+            f.write(msg + "\n")
         return
         
     def fetch_course_progress(c: dict) -> dict:
@@ -311,22 +329,48 @@ def list_enrolled_courses() -> None:
         name = c.get("name")
         
         # Get completed items
-        prog_url = f"https://www.coursera.org/api/onDemandCoursesProgress.v1/{user_id}~{course_id}"
+        prog_url = f"https://www.coursera.org/api/onDemandCoursesProgress.v1/{user_id}~{course_id}?fields=gradedAssignmentGroupProgress"
         pr = client.get(prog_url)
         completed = 0
+        pelements = []
+        completed_set = set()
         if pr.status_code == 200:
             pelements = pr.json().get("elements", [])
             if pelements:
                 items = pelements[0].get("items", {})
-                completed = sum(1 for item in items.values() if item.get("progressState") == "Completed")
+                completed_set = {
+                    item_id
+                    for item_id, progress in items.items()
+                    if progress.get("progressState") == "Completed"
+                }
                 
-        # Get total items
-        mat_url = f"https://www.coursera.org/api/onDemandCourseMaterials.v2/?q=slug&slug={slug}&includes=items"
+        # Get total items and grading parameters
+        mat_url = f"https://www.coursera.org/api/onDemandCourseMaterials.v2/?q=slug&slug={slug}&includes=items,gradingParameters&fields=onDemandGradingParameters.v1(gradedAssignmentGroups)"
         mr = client.get(mat_url)
         total = "?"
         if mr.status_code == 200:
-            total = len(mr.json().get("linked", {}).get("onDemandCourseMaterialItems.v2", []))
-            
+            mdata = mr.json()
+            total = len(mdata.get("linked", {}).get("onDemandCourseMaterialItems.v2", []))
+            if pelements and total != "?":
+                group_progress = pelements[0].get("gradedAssignmentGroupProgress", {})
+                grp_params = {}
+                for param in mdata.get("linked", {}).get("onDemandGradingParameters.v1", []):
+                    grp_params.update(param.get("gradedAssignmentGroups", {}))
+                for group_id, grp_prog in group_progress.items():
+                    grp_info = grp_params.get(group_id, {})
+                    grp_items = grp_info.get("itemIds", [])
+                    num_required = grp_info.get("gradingType", {}).get("definition", {}).get("numberOfSelectedItems", 0)
+                    if grp_prog.get("state") == "Completed" or (num_required > 0 and len([i for i in grp_items if i in completed_set]) >= num_required):
+                        for alt_id in grp_items:
+                            completed_set.add(alt_id)
+                modules = pelements[0].get("modules", {})
+                if modules and all(score >= 100 for score in modules.values()):
+                    completed = total
+                else:
+                    completed = len(completed_set)
+        elif pelements:
+            completed = len(completed_set)
+
         return {
             "name": name,
             "slug": slug,
@@ -341,18 +385,27 @@ def list_enrolled_courses() -> None:
         for future in as_completed(futures):
             results.append(future.result())
             
-    print("\n" + "="*60)
-    print(" ENROLLED COURSES ".center(60, "="))
-    print("="*60)
+    output_lines = [
+        "=" * 60,
+        " ENROLLED COURSES ".center(60, "="),
+        "=" * 60,
+    ]
     
     for res in results:
         percentage = f"{(res['completed'] / int(res['total']) * 100):.1f}%" if str(res['total']).isdigit() and res['total'] > 0 else "N/A"
-        print(f"Title    : {res['name']}")
-        print(f"Slug     : {res['slug']}")
-        print(f"Progress : {res['completed']} / {res['total']} completed ({percentage})")
-        print(f"Command  : python -m skipera.main {res['slug']} --llm")
-        print("-" * 60)
-    print("\n")
+        output_lines.append(f"Title    : {res['name']}")
+        output_lines.append(f"Slug     : {res['slug']}")
+        output_lines.append(f"Progress : {res['completed']} / {res['total']} completed ({percentage})")
+        output_lines.append(f"Command  : python -m skipera.main {res['slug']} --llm")
+        output_lines.append(f"UV Cmd   : uv run skipera {res['slug']} --llm")
+        output_lines.append("-" * 60)
+    
+    output_text = "\n".join(output_lines)
+    print("\n" + output_text + "\n")
+
+    with open("output.list", "w", encoding="utf-8") as f:
+        f.write(output_text + "\n")
+    logger.info("Saved enrolled courses to output.list")
 
 
 @logger.catch

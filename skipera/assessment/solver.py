@@ -352,6 +352,9 @@ class GradedSolver(object):
             except Exception:
                 pass
 
+        max_assessment_attempts = 2
+        assessment_attempt = 0
+
         while True:
             state = self.get_state()
 
@@ -399,6 +402,13 @@ class GradedSolver(object):
 
             else:
                 logger.error(f"Unexpected allowedAction: {allowed}")
+                return False
+
+            assessment_attempt += 1
+            if assessment_attempt > max_assessment_attempts:
+                logger.warning(
+                    f"Exceeded max attempts ({max_assessment_attempts}) — skipping assignment."
+                )
                 return False
 
             self.discarded_questions = []
@@ -542,36 +552,61 @@ class GradedSolver(object):
                     current_system_prompt = SYSTEM_PROMPT
 
                 llm_result = None
-                if config.PERPLEXITY_API_KEY:
-                    connector = PerplexityConnector()
-                elif config.GEMINI_API_KEY:
-                    connector = GeminiConnector()
-                elif getattr(config, "GROQ_API_KEYS", []):
-                    # Try each Groq API key until one works
-                    for key in config.GROQ_API_KEYS:
-                        connector = GroqConnector(api_key=key)
-                        try:
+                max_llm_retries = 2
+                for llm_attempt in range(max_llm_retries):
+                    try:
+                        if config.PERPLEXITY_API_KEY:
+                            connector = PerplexityConnector()
                             llm_result = connector.get_response(
                                 llm_prompt,
                                 system_prompt=current_system_prompt,
                                 response_schema=DEFAULT_RESPONSE_SCHEMA,
                             )
-                            break  # success
-                        except Exception as e:
-                            logger.warning(f"Groq key failed ({key[:4]}...): {e}")
-                    else:
-                        raise RuntimeError("All Groq API keys exhausted.")
-                elif config.GROQ_API_KEY:
-                    connector = GroqConnector()
-                else:
-                    raise RuntimeError("No API Key specified.")
-                # If we haven't obtained llm_result yet (i.e., using Perplexity or Gemini), fetch it now
-                if llm_result is None:
-                    llm_result = connector.get_response(
-                        llm_prompt,
-                        system_prompt=current_system_prompt,
-                        response_schema=DEFAULT_RESPONSE_SCHEMA,
-                    )
+                        elif config.GEMINI_API_KEY:
+                            connector = GeminiConnector()
+                            llm_result = connector.get_response(
+                                llm_prompt,
+                                system_prompt=current_system_prompt,
+                                response_schema=DEFAULT_RESPONSE_SCHEMA,
+                            )
+                        elif getattr(config, "GROQ_API_KEYS", []):
+                            for key in config.GROQ_API_KEYS:
+                                connector = GroqConnector(api_key=key)
+                                try:
+                                    llm_result = connector.get_response(
+                                        llm_prompt,
+                                        system_prompt=current_system_prompt,
+                                        response_schema=DEFAULT_RESPONSE_SCHEMA,
+                                    )
+                                    break
+                                except Exception as e:
+                                    logger.warning(f"Groq key failed ({key[:4]}...): {e}")
+                            else:
+                                raise RuntimeError("All Groq API keys exhausted.")
+                        elif config.GROQ_API_KEY:
+                            connector = GroqConnector()
+                            llm_result = connector.get_response(
+                                llm_prompt,
+                                system_prompt=current_system_prompt,
+                                response_schema=DEFAULT_RESPONSE_SCHEMA,
+                            )
+                        else:
+                            raise RuntimeError("No API Key specified.")
+
+                        if llm_result is not None:
+                            break
+                    except Exception as e:
+                        logger.warning(f"LLM request attempt {llm_attempt + 1}/{max_llm_retries} failed: {e}")
+                        if llm_attempt + 1 < max_llm_retries:
+                            time.sleep(2.0)
+                        else:
+                            logger.error(f"LLM failed after {max_llm_retries} attempts — skipping assignment.")
+                            return False
+
+                if llm_result is None or not llm_result.get("responses"):
+                    logger.error("No valid responses from LLM — skipping assignment.")
+                    return False
+
                 for ans in llm_result.get("responses", []):
                     q_id = ans.get("question_id")
                     q_info = unsolved_questions.get(q_id)
@@ -586,7 +621,7 @@ class GradedSolver(object):
                         )
                     )
             else:
-                if wrong_answers_page is not None:
+                if wrong_answers_page is not None or assessment_attempt > 1:
                     logger.warning(
                         "No more unsolved questions to improve, but earned grade is below target. Stopping to avoid draining attempts."
                     )
@@ -595,51 +630,59 @@ class GradedSolver(object):
                     "All questions already correct — resubmitting same answers.")
 
             if not self.save_responses(answer_responses):
-                logger.error("Could not save responses. Please file an issue.")
+                logger.error("Could not save responses — skipping assignment.")
                 return False
             if not self.submit_draft():
-                logger.error(
-                    "Could not submit the assignment. Please file an issue.")
+                logger.error("Could not submit the assignment — skipping assignment.")
                 return False
 
             time.sleep(5.0)
-            feedback_result = self.get_feedback(max_retries=8)
-            if feedback_result:
-                outcome = feedback_result.get("outcome") or {}
-                latest_score = outcome.get("latestScore", 0)
-                max_score = outcome.get("maxScore", 1)
-                earned_grade = latest_score / max_score if max_score else 0
+            feedback_result = self.get_feedback(max_retries=2)
+            if not feedback_result:
+                logger.warning("Feedback not ready after 2 attempts — skipping assignment.")
+                return False
 
-                self._update_data_from_feedback(
-                    feedback_result.get("parts", []), answer_responses)
-                self._save_data()
+            outcome = feedback_result.get("outcome") or {}
+            latest_score = outcome.get("latestScore", 0)
+            max_score = outcome.get("maxScore", 1)
+            earned_grade = latest_score / max_score if max_score else 0
 
-                logger.info(
-                    f"Earned grade: {earned_grade:.1%} | Target grade: {target_grade:.1%}"
-                )
+            self._update_data_from_feedback(
+                feedback_result.get("parts", []), answer_responses)
+            self._save_data()
 
-                if outcome.get("isPassed") or earned_grade >= target_grade:
-                    if page_file.exists():
-                        try:
-                            page_file.unlink()
-                        except Exception:
-                            pass
-                    logger.success("Passed!")
-                    return True
-                else:
-                    logger.warning(
-                        f"Earned grade {earned_grade:.1%} is lower than target grade {target_grade:.1%}. Building wrong answers feedback page..."
-                    )
-                    wrong_answers_page = self.build_wrong_answers_page(
-                        feedback_result, answer_responses, earned_grade, target_grade
-                    )
+            logger.info(
+                f"Earned grade: {earned_grade:.1%} | Target grade: {target_grade:.1%}"
+            )
+
+            if outcome.get("isPassed") or earned_grade >= target_grade:
+                if page_file.exists():
                     try:
-                        page_file = self.data_dir / f"{self.course_id}~{self.item_id}_wrong_answers.txt"
-                        page_file.write_text(wrong_answers_page, encoding="utf-8")
-                        with open("wrong_answers.txt", "w", encoding="utf-8") as f:
-                            f.write(wrong_answers_page)
-                    except Exception as e:
-                        logger.debug(f"Could not save wrong_answers.txt: {e}")
+                        page_file.unlink()
+                    except Exception:
+                        pass
+                logger.success("Passed!")
+                return True
+            else:
+                if assessment_attempt >= max_assessment_attempts:
+                    logger.warning(
+                        f"Earned grade {earned_grade:.1%} is lower than target grade {target_grade:.1%} after {assessment_attempt} attempts — skipping assignment."
+                    )
+                    return False
+
+                logger.warning(
+                    f"Earned grade {earned_grade:.1%} is lower than target grade {target_grade:.1%}. Building wrong answers feedback page (retry {assessment_attempt + 1}/{max_assessment_attempts})..."
+                )
+                wrong_answers_page = self.build_wrong_answers_page(
+                    feedback_result, answer_responses, earned_grade, target_grade
+                )
+                try:
+                    page_file = self.data_dir / f"{self.course_id}~{self.item_id}_wrong_answers.txt"
+                    page_file.write_text(wrong_answers_page, encoding="utf-8")
+                    with open("wrong_answers.txt", "w", encoding="utf-8") as f:
+                        f.write(wrong_answers_page)
+                except Exception as e:
+                    logger.debug(f"Could not save wrong_answers.txt: {e}")
 
             random_delay()
 
@@ -808,7 +851,7 @@ class GradedSolver(object):
 
         return "Submission_SubmitLatestDraftSuccess" in res.text
 
-    def get_feedback(self, max_retries: int = 8) -> dict | None:
+    def get_feedback(self, max_retries: int = 2) -> dict | None:
         """
         Fetches AssignmentFeedback for per-question correctness.
         """
@@ -837,8 +880,9 @@ class GradedSolver(object):
 
             logger.warning(
                 f"Feedback not ready yet (attempt {i + 1}/{max_retries})")
-            time.sleep(3.0)
-            random_delay()
+            if i + 1 < max_retries:
+                time.sleep(3.0)
+                random_delay()
 
         logger.warning("Feedback did not become available in time.")
         return None

@@ -19,51 +19,77 @@ HEADERS = {
 }
 
 
-def get_coursera_client_and_user():
-    """Initializes an HTTP client with saved Coursera cookies and retrieves user ID."""
+def get_coursera_session_data():
+    """
+    Initializes an HTTP client with saved Coursera cookies and retrieves user ID
+    along with active course memberships, matching `skipera --list` logic.
+    Returns (client, user_id, enrolled_courses_dict).
+    """
     try:
         import httpx
     except ImportError:
-        return None, None
+        return None, None, {}
 
     if not CONFIG_FILE.is_file():
-        return None, None
+        return None, None, {}
 
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         cookies = cfg.get("cookies", {})
         if not cookies:
-            return None, None
+            return None, None, {}
 
         client = httpx.Client(
             cookies=cookies,
             headers=HEADERS,
-            timeout=20.0,
+            timeout=25.0,
             verify=False,
             follow_redirects=True,
         )
 
-        r = client.get("https://www.coursera.org/api/adminUserPermissions.v1?q=my")
-        if r.status_code == 200:
-            elements = r.json().get("elements", [])
-            if elements and "id" in elements[0]:
-                return client, elements[0]["id"]
+        # Query memberships exactly like `skipera --list`
+        mem_url = (
+            "https://www.coursera.org/api/memberships.v1"
+            "?includes=courseId,courses.v1&q=me&showHidden=true&filter=current"
+        )
+        r = client.get(mem_url)
+        if r.status_code != 200:
+            return client, None, {}
+
+        data = r.json()
+        elements = data.get("elements", [])
+        if not elements:
+            return client, None, {}
+
+        user_id = str(elements[0].get("userId", ""))
+        courses_list = data.get("linked", {}).get("courses.v1", [])
+        enrolled_courses = {c["slug"]: c for c in courses_list if "slug" in c}
+        return client, user_id, enrolled_courses
     except Exception:
-        pass
-
-    return None, None
+        return None, None, {}
 
 
-def check_course_completed(client, user_id: str, slug: str):
+def check_course_status(client, user_id: str, enrolled_courses: dict, slug: str) -> dict:
     """
-    Checks if a course is 100% completed.
-    Returns (is_completed, completed_count, total_count).
-    If check cannot be determined, returns (False, None, None).
+    Checks course status and progress using the same logic as `skipera --list`.
+    Returns dict:
+      {
+        'status': 'completed' | 'incomplete' | 'not_enrolled' | 'unknown',
+        'completed': int,
+        'total': int,
+        'percentage': float,
+        'reason': str
+      }
     """
     if not client or not user_id:
-        return False, None, None
+        return {"status": "unknown", "reason": "No active Coursera session"}
 
     try:
+        course_id = None
+        if slug in enrolled_courses:
+            course_id = enrolled_courses[slug].get("id")
+
+        # Get course materials and total items
         mat_url = (
             f"https://www.coursera.org/api/onDemandCourseMaterials.v2/"
             f"?q=slug&slug={slug}&includes=items,gradingParameters"
@@ -71,38 +97,62 @@ def check_course_completed(client, user_id: str, slug: str):
         )
         mr = client.get(mat_url)
         if mr.status_code != 200:
-            return False, None, None
+            return {"status": "unknown", "reason": f"Could not load materials for slug '{slug}'"}
 
         mdata = mr.json()
         elements = mdata.get("elements", [])
         if not elements:
-            return False, None, None
+            return {"status": "unknown", "reason": f"No course elements for slug '{slug}'"}
 
-        course_id = elements[0].get("id")
+        if not course_id:
+            course_id = elements[0].get("id")
+
         total = len(mdata.get("linked", {}).get("onDemandCourseMaterialItems.v2", []))
-        if total == 0:
-            return False, None, None
 
+        # Query course progress (identical to `skipera --list`)
         prog_url = (
             f"https://www.coursera.org/api/onDemandCoursesProgress.v1/{user_id}~{course_id}"
             f"?fields=gradedAssignmentGroupProgress"
         )
         pr = client.get(prog_url)
+
+        # Detect if user is NOT enrolled in the course
+        if pr.status_code == 403 or "Not Authorized" in pr.text:
+            return {
+                "status": "not_enrolled",
+                "completed": 0,
+                "total": total,
+                "percentage": 0.0,
+                "reason": "403 Not Authorized - user is not enrolled in this course",
+            }
+
         if pr.status_code != 200:
-            return False, None, total
+            return {"status": "unknown", "reason": f"Progress API returned status {pr.status_code}"}
 
         pdata = pr.json()
         pelements = pdata.get("elements", [])
         if not pelements:
-            return False, 0, total
+            return {
+                "status": "incomplete",
+                "completed": 0,
+                "total": total,
+                "percentage": 0.0,
+                "reason": "No progress elements recorded",
+            }
 
         pelem = pelements[0]
 
         # Check module scores (if all modules >= 100%, course is complete)
         modules = pelem.get("modules", {})
         if modules and all(score >= 100 for score in modules.values()):
-            return True, total, total
+            return {
+                "status": "completed",
+                "completed": total,
+                "total": total,
+                "percentage": 100.0,
+            }
 
+        # Check item-level progress
         items = pelem.get("items", {})
         completed_set = {
             item_id
@@ -110,7 +160,7 @@ def check_course_completed(client, user_id: str, slug: str):
             if prog.get("progressState") == "Completed"
         }
 
-        # Check elective / alternative graded assignment groups
+        # Handle elective / alternative graded assignment groups
         group_progress = pelem.get("gradedAssignmentGroupProgress", {})
         grp_params = {}
         for param in mdata.get("linked", {}).get("onDemandGradingParameters.v1", []):
@@ -130,10 +180,18 @@ def check_course_completed(client, user_id: str, slug: str):
                     completed_set.add(alt_id)
 
         completed_count = len(completed_set)
-        return (completed_count >= total), completed_count, total
+        pct = (completed_count / total * 100) if total > 0 else 0.0
+        is_done = (completed_count >= total and total > 0)
 
-    except Exception:
-        return False, None, None
+        return {
+            "status": "completed" if is_done else "incomplete",
+            "completed": completed_count,
+            "total": total,
+            "percentage": pct,
+        }
+
+    except Exception as e:
+        return {"status": "unknown", "reason": str(e)}
 
 
 def main():
@@ -195,13 +253,13 @@ def main():
     if args.llm:
         print("LLM mode enabled (--llm will be passed to skipera).")
 
-    # Initialize completion checker
-    client, user_id = get_coursera_client_and_user()
+    # Initialize session and enrolled courses matching `skipera --list`
+    client, user_id, enrolled_courses = get_coursera_session_data()
     if not client or not user_id:
-        print("[!] Note: Could not pre-authenticate with Coursera cookies for completion checks.")
-        print("    All courses will be run directly with skipera.")
+        print("[!] Note: Could not load Coursera cookies. Running skipera directly.")
 
-    skipped_count = 0
+    skipped_completed = 0
+    skipped_not_enrolled = 0
     executed_count = 0
 
     for idx, slug in enumerate(slugs, 1):
@@ -209,21 +267,36 @@ def main():
         print(f"[{idx}/{len(slugs)}] Course: {slug}".center(60))
         print("=" * 60)
 
-        # Check completion
+        # Check course status (matching skipera --list)
         if not args.force and client and user_id:
-            print(f"Checking completion progress for '{slug}'...")
-            is_done, done_items, total_items = check_course_completed(client, user_id, slug)
-            if is_done:
-                pct = (done_items / total_items * 100) if total_items else 100.0
-                print(f"[+] Already Completed ({done_items}/{total_items} items, {pct:.1f}%).")
-                print(f"    --> Skipping '{slug}' (use --force to re-run).")
-                skipped_count += 1
+            info = check_course_status(client, user_id, enrolled_courses, slug)
+            status = info.get("status")
+
+            if status == "not_enrolled":
+                print(f"[!] NOT ENROLLED: You are not enrolled in '{slug}'.")
+                print("    (Coursera returned 403 Not Authorized)")
+                print("    --> Skipping to prevent failure loops. Please enroll on coursera.org first.")
+                skipped_not_enrolled += 1
                 continue
-            elif done_items is not None and total_items is not None:
-                pct = (done_items / total_items * 100) if total_items else 0.0
-                print(f"[-] Incomplete ({done_items}/{total_items} items, {pct:.1f}%). Running skipera...")
+
+            elif status == "completed":
+                done = info.get("completed", 0)
+                tot = info.get("total", 0)
+                pct = info.get("percentage", 100.0)
+                print(f"[+] Already Completed ({done}/{tot} items, {pct:.1f}%).")
+                print(f"    --> Skipping '{slug}' (use --force to re-run).")
+                skipped_completed += 1
+                continue
+
+            elif status == "incomplete":
+                done = info.get("completed", 0)
+                tot = info.get("total", 0)
+                pct = info.get("percentage", 0.0)
+                print(f"[-] Incomplete ({done}/{tot} items, {pct:.1f}%). Running skipera...")
+
             else:
-                print("[?] Could not determine completion progress. Running skipera as precaution...")
+                reason = info.get("reason", "unknown")
+                print(f"[?] Could not determine progress ({reason}). Running skipera as precaution...")
 
         cmd = ["uv", "run", "skipera", slug]
         if args.llm:
@@ -242,7 +315,10 @@ def main():
             print(f"\n[!] Error running '{slug}': {e}")
 
     print("\n" + "=" * 60)
-    summary = f"Summary: {executed_count} executed, {skipped_count} skipped (already complete)"
+    summary_parts = [f"{executed_count} executed", f"{skipped_completed} skipped (completed)"]
+    if skipped_not_enrolled > 0:
+        summary_parts.append(f"{skipped_not_enrolled} skipped (not enrolled)")
+    summary = f"Summary: {', '.join(summary_parts)}"
     print(summary.center(60))
     print("=" * 60 + "\n")
 

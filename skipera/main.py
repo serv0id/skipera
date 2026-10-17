@@ -22,6 +22,7 @@ class Skipera(object):
         self.course = course
         self.llm = llm
         self.failed_items = set()
+        self.locally_completed = set()
         if not self.get_userid():
             self.refresh_cookies()
             if not self.get_userid():
@@ -111,7 +112,10 @@ class Skipera(object):
             except SystemExit:
                 current_items = all_items
 
-            pending_items = [item for item in current_items if item["id"] not in completed]
+            pending_items = [
+                item for item in current_items 
+                if item["id"] not in completed and item["id"] not in self.locally_completed
+            ]
             if not pending_items:
                 logger.info(f"Finished: {total}/{total} completed.")
                 break
@@ -125,6 +129,9 @@ class Skipera(object):
                     f"Finished: {total - len(pending_items)}/{total} completed, {len(pending_items)} still locked/pending."
                 )
                 break
+
+            prev_locally_completed_count = len(self.locally_completed)
+            prev_failed_count = len(self.failed_items)
 
             concurrent_items = []
             sequential_items = []
@@ -144,18 +151,26 @@ class Skipera(object):
                         item = futures[future]
                         try:
                             success = future.result()
-                            if not success:
+                            if success:
+                                self.locally_completed.add(item["id"])
+                            else:
                                 self.failed_items.add(item["id"])
                         except Exception as e:
                             logger.exception(f"Error in processing item: {e}")
                             self.failed_items.add(item["id"])
+
+                if len(self.locally_completed) == prev_locally_completed_count and len(self.failed_items) == prev_failed_count:
+                    logger.warning("No progress made in concurrent batch — stopping to avoid infinite loop.")
+                    break
                 continue
 
             if sequential_items:
                 item = sequential_items[0]
                 try:
                     success = self.process_item(item)
-                    if not success:
+                    if success:
+                        self.locally_completed.add(item["id"])
+                    else:
                         self.failed_items.add(item["id"])
                 except Exception as e:
                     logger.exception(f"Error in processing item: {e}")
@@ -201,6 +216,12 @@ class Skipera(object):
         )
 
         if r.status_code != 200:
+            if r.status_code == 403 or "Not Authorized" in r.text:
+                logger.error(
+                    f"Not authorized to access progress for course '{self.course}'! "
+                    "Please verify that you are actively enrolled in this course."
+                )
+                raise SystemExit
             logger.debug("Could not fetch course progress.")
             logger.debug(r.text)
             return set()
@@ -233,10 +254,21 @@ class Skipera(object):
         r = self.session.get(self.base_url + f"onDemandLectureVideos.v1/{self.course_id}~{item_id}", params={
             "includes": "video",
             "fields": "disableSkippingForward,startMs,endMs"
-        }).json()
+        })
+        if r.status_code != 200:
+            logger.error(f"Failed to get video metadata for item {item_id}: {r.status_code}")
+            return {"can_skip": True, "tracking_id": None}
 
-        return {"can_skip": not r["elements"][0]["disableSkippingForward"],
-                "tracking_id": r["linked"]["onDemandVideos.v1"][0]["id"]}
+        try:
+            data = r.json()
+            elements = data.get("elements") or []
+            linked_videos = data.get("linked", {}).get("onDemandVideos.v1", [])
+            can_skip = not elements[0].get("disableSkippingForward", False) if elements else True
+            tracking_id = linked_videos[0].get("id") if linked_videos else None
+            return {"can_skip": can_skip, "tracking_id": tracking_id}
+        except Exception as e:
+            logger.error(f"Error parsing video metadata for item {item_id}: {e}")
+            return {"can_skip": True, "tracking_id": None}
 
     def watch_item(self, item: dict, metadata: dict) -> bool:
         watcher = Watcher(self.session, item, metadata,

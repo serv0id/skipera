@@ -1,6 +1,8 @@
 import time
 import os
 import json
+import re
+import html
 from datetime import datetime, timezone
 
 import httpx
@@ -15,22 +17,35 @@ from ..llm.connector import DEFAULT_RESPONSE_SCHEMA, PerplexityConnector, Gemini
 from ..session_utils import get_csrf_headers, random_delay
 
 
+def clean_cml_or_html(text: str) -> str:
+    """Helper to convert Coursera CML or HTML markup into clean readable plain text."""
+    if not text:
+        return ""
+    text = html.unescape(text)
+    text = re.sub(r'</?(?:p|div|li|tr)[^>]*>', '\n', text)
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
 SYSTEM_PROMPT = (
     "Answer the provided questions. Be precise and concise.\n"
-    "The questions are in a dict format where each key represents the question id, and the value is a JSON dict containing:\n"
-    "- 'Question': the question text (which might have HTML tags, ignore them).\n"
+    "The input contains questions to solve. If a previous attempt scored below the required passing grade, "
+    "it includes 'wrong_answers_review_page' with the feedback review page showing the incorrect answers and grader explanations from Coursera.\n"
+    "Each question is a JSON dict containing:\n"
+    "- 'Question': the question text.\n"
     "- 'Options': a list of options (for MULTIPLE_CHOICE and CHECKBOX types) with option_id and value.\n"
     "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', 'TEXT_REFLECT', 'RICH_TEXT', or 'PLAIN_TEXT'.\n"
-    "- 'previous_attempts': (optional, only for CHECKBOX) past attempt results.\n\n"
+    "- 'previous_attempt': (optional) information on what was submitted in the previous attempt, whether it was INCORRECT, and grader feedback.\n"
+    "- 'previous_attempts': (optional, for CHECKBOX) past attempt results with partial scores.\n\n"
     "Rules for each question type:\n"
     "1. MULTIPLE_CHOICE: Single-choice question. Select exactly one option_id and place it in the 'chosen' list. (CRITICAL: You MUST use the exact 'option_id' hash string, do NOT use indices like '1' or '2'!).\n"
     "2. CHECKBOX: Multi-choice question. Select one or more option_ids and place them in the 'chosen' list. (CRITICAL: You MUST use the exact 'option_id' hash strings!).\n"
     "3. TEXT_REFLECT, RICH_TEXT, PLAIN_TEXT: Open-ended questions with no options. Answer the question prompt thoroughly, thoughtfully, and precisely matching all requirements and guidelines specified in the prompt (e.g., word count, required points, terminology). The response in the 'answer' field must be a high-quality, comprehensive response directly satisfying all criteria in the prompt.\n\n"
-    "IMPORTANT for CHECKBOX:\n"
-    "If a question has 'previous_attempts', each entry records a prior submission of chosen option_ids:\n"
-    "- 'response' is a list of option_ids that were chosen together.\n"
-    "- 'hint' states that this combination was graded INCORRECT and shows the fractional score earned (e.g. 'Score: 1/3').\n"
-    "Use these partial scores to logically deduce the status of options (e.g., if a combination of size 3 got 2/3 correct, then exactly 2 of those options are correct, and 1 is incorrect). Integrate all attempts to find an untested combination that satisfies these constraints."
+    "CRITICAL CORRECTION INSTRUCTIONS:\n"
+    "When 'wrong_answers_review_page' or 'previous_attempt' is provided, the previous submission was graded below the target grade.\n"
+    "Carefully review the wrong answers and grader feedback! Do NOT repeat known incorrect answers or rejected options. Use the feedback explanations to select the correct answer for each question."
 )
 
 
@@ -44,10 +59,11 @@ TYPE_LOOKUP = {
 
 
 class GradedSolver(object):
-    def __init__(self, session: httpx.Client, course_id: str, item_id: str):
+    def __init__(self, session: httpx.Client, course_id: str, item_id: str, slug: str | None = None):
         self.session: httpx.Client = session
         self.course_id: str = course_id
         self.item_id: str = item_id
+        self.slug: str | None = slug
         self.attempt_id = None
         self.draft_id = None
         self.discarded_questions = []
@@ -156,9 +172,143 @@ class GradedSolver(object):
                 }
             }
 
+    def build_wrong_answers_page(self, feedback_data: dict, submitted_responses: list, earned_grade: float, target_grade: float) -> str:
+        """
+        Builds a comprehensive review page detailing all questions that were answered incorrectly,
+        the submitted answers, and the grader feedback/explanations from Coursera.
+        """
+        outcome = feedback_data.get("outcome") or {}
+        latest_score = outcome.get("latestScore", 0)
+        max_score = outcome.get("maxScore", 1)
+        parts = feedback_data.get("parts", [])
+
+        response_lookup = {}
+        for resp in submitted_responses:
+            q_type = resp["questionType"]
+            if q_type == "RICH_TEXT":
+                try:
+                    response_lookup[resp["questionId"]] = resp["questionResponse"]["richTextResponse"]["richText"]["html"]["value"]
+                except (KeyError, TypeError):
+                    response_lookup[resp["questionId"]] = ""
+            elif q_type == "PLAIN_TEXT":
+                try:
+                    response_lookup[resp["questionId"]] = resp["questionResponse"]["plainTextResponse"]["plainText"]
+                except (KeyError, TypeError):
+                    response_lookup[resp["questionId"]] = ""
+            else:
+                response_key, val_key = TYPE_LOOKUP.get(q_type, ("", ""))
+                if response_key and val_key:
+                    try:
+                        response_lookup[resp["questionId"]] = resp["questionResponse"][response_key][val_key]
+                    except (KeyError, TypeError):
+                        pass
+
+        lines = [
+            "=" * 70,
+            "COURSERA ASSESSMENT FEEDBACK & WRONG ANSWERS REVIEW PAGE",
+            "=" * 70,
+            f"Score Earned  : {latest_score} / {max_score} ({earned_grade:.1%})",
+            f"Target Grade  : {target_grade:.1%}",
+            f"Result        : BELOW TARGET GRADE - CORRECTION REQUIRED",
+        ]
+        if self.slug and self.item_id:
+            lines.append(f"Review URL    : https://www.coursera.org/learn/{self.slug}/exam/{self.item_id}/feedback")
+        lines.append("-" * 70)
+        lines.append("The following questions were answered INCORRECTLY in the previous attempt.")
+        lines.append("Read the Grader Feedback and explanations carefully to correct each answer:")
+        lines.append("-" * 70)
+
+        wrong_count = 0
+        for idx, part in enumerate(parts, start=1):
+            fb = part.get("feedback") or {}
+            correctness = fb.get("correctness")
+            outcome_part = fb.get("autoGradedFeedbackOutcome") or {}
+            part_score = outcome_part.get("score", 0)
+            part_max = outcome_part.get("maxScore", 1)
+
+            is_wrong = correctness in {"INCORRECT", "PARTIALLY_CORRECT"} or (part_score is not None and part_max is not None and part_score < part_max)
+            if not is_wrong:
+                continue
+
+            wrong_count += 1
+            schema = part.get("questionSchema") or {}
+            prompt = clean_cml_or_html(schema.get("prompt", {}).get("cmlValue") or schema.get("prompt", {}).get("htmlWithMetadata", {}).get("html", ""))
+
+            options = []
+            for opt in schema.get("options") or []:
+                val = clean_cml_or_html(opt.get("display", {}).get("cmlValue") or opt.get("display", {}).get("htmlWithMetadata", {}).get("html", ""))
+                options.append({"id": opt.get("optionId"), "value": val})
+
+            feedback_part_id = part.get("partId", "")
+            feedback_key = feedback_part_id.split("~")[-1]
+
+            submitted_str = ""
+            chosen_ids = set()
+            if "multipleChoiceResponse" in part and part["multipleChoiceResponse"]:
+                cid = part["multipleChoiceResponse"].get("chosen")
+                if cid:
+                    chosen_ids.add(cid)
+                    cval = next((o["value"] for o in options if o["id"] == cid), cid)
+                    submitted_str = f'"{cval}" (option_id: {cid})'
+            elif "checkboxResponse" in part and part["checkboxResponse"]:
+                cids = part["checkboxResponse"].get("chosen") or []
+                chosen_strs = []
+                for cid in cids:
+                    chosen_ids.add(cid)
+                    cval = next((o["value"] for o in options if o["id"] == cid), cid)
+                    chosen_strs.append(f'"{cval}" (option_id: {cid})')
+                submitted_str = ", ".join(chosen_strs)
+            elif "numericResponse" in part and part["numericResponse"]:
+                submitted_str = str(part["numericResponse"].get("answer", ""))
+            elif "plainTextResponse" in part and part["plainTextResponse"]:
+                submitted_str = part["plainTextResponse"].get("plainText", "")
+            elif "richTextResponse" in part and part["richTextResponse"]:
+                submitted_str = clean_cml_or_html(part["richTextResponse"].get("richText", {}).get("html", {}).get("value", ""))
+
+            if not submitted_str:
+                for k, v in response_lookup.items():
+                    if k.split("~")[-1] == feedback_key:
+                        if isinstance(v, list):
+                            chosen_strs = []
+                            for cid in v:
+                                chosen_ids.add(cid)
+                                cval = next((o["value"] for o in options if o["id"] == cid), cid)
+                                chosen_strs.append(f'"{cval}" (option_id: {cid})')
+                            submitted_str = ", ".join(chosen_strs)
+                        elif isinstance(v, str) and options:
+                            chosen_ids.add(v)
+                            cval = next((o["value"] for o in options if o["id"] == v), v)
+                            submitted_str = f'"{cval}" (option_id: {v})'
+                        else:
+                            submitted_str = str(v)
+                        break
+
+            if not submitted_str:
+                submitted_str = "(None or Blank)"
+
+            grader_fb = clean_cml_or_html(fb.get("feedback", {}).get("cmlValue") or fb.get("feedback", {}).get("htmlWithMetadata", {}).get("html", ""))
+
+            lines.append(f"\n[QUESTION {idx}] (Score: {part_score}/{part_max}) - {correctness or 'INCORRECT'}")
+            lines.append(f"Prompt: {prompt}")
+            lines.append(f"Your Previous Submitted Answer: {submitted_str}")
+            if grader_fb:
+                lines.append(f"Grader Feedback / Explanation: {grader_fb}")
+
+            if options:
+                lines.append("Options Available:")
+                for opt in options:
+                    flag = " [FAILED IN PREVIOUS ATTEMPT - INCORRECT]" if opt["id"] in chosen_ids else ""
+                    lines.append(f"  - (option_id: {opt['id']}) {opt['value']}{flag}")
+            lines.append("-" * 70)
+
+        lines.append(f"\nTotal Incorrect Questions: {wrong_count}")
+        lines.append("=" * 70)
+        return "\n".join(lines)
+
     def solve(self) -> bool:
         # Overwrite minimum passing score
         target_grade = 0.8
+        wrong_answers_page = None
 
         while True:
             state = self.get_state()
@@ -218,6 +368,7 @@ class GradedSolver(object):
             for part_id, q in questions.items():
                 q_type = q["Type"]
                 options = q.get("Options", [])
+                latest_fb = q.get("latest_feedback", {})
 
                 if q_type in {"TEXT_REFLECT", "RICH_TEXT", "PLAIN_TEXT"}:
                     if q.get("correct_answer"):
@@ -228,10 +379,18 @@ class GradedSolver(object):
                         ))
                     else:
                         unsolved_questions[part_id] = {
+                            "question_id": part_id,
                             "Question": q["Question"],
                             "Options": [],
                             "Type": q_type
                         }
+                        if latest_fb and latest_fb.get("correctness") != "CORRECT":
+                            unsolved_questions[part_id]["previous_attempt"] = {
+                                "status": latest_fb.get("correctness") or "INCORRECT",
+                                "score": f"{latest_fb.get('score', 0)}/{latest_fb.get('max_score', 1)}",
+                                "submitted_answer": latest_fb.get("submitted_chosen"),
+                                "grader_feedback": latest_fb.get("feedback_text")
+                            }
                 elif q_type == "MULTIPLE_CHOICE":
                     known_correct_id = next((opt["option_id"] for opt in options if opt.get("correct") is True), None)
                     if known_correct_id:
@@ -252,10 +411,21 @@ class GradedSolver(object):
                         continue
 
                     unsolved_questions[part_id] = {
+                        "question_id": part_id,
                         "Question": q["Question"],
                         "Options": filtered_options,
                         "Type": "MULTIPLE_CHOICE"
                     }
+                    if latest_fb and latest_fb.get("correctness") != "CORRECT":
+                        submitted_id = latest_fb.get("submitted_chosen")
+                        submitted_text = self._get_response_text(options, submitted_id) if submitted_id else None
+                        unsolved_questions[part_id]["previous_attempt"] = {
+                            "status": latest_fb.get("correctness") or "INCORRECT",
+                            "score": f"{latest_fb.get('score', 0)}/{latest_fb.get('max_score', 1)}",
+                            "submitted_option_id": submitted_id,
+                            "submitted_option_text": submitted_text,
+                            "grader_feedback": latest_fb.get("feedback_text")
+                        }
                 elif q_type == "CHECKBOX":
                     all_resolved = all(opt.get("correct") is not None for opt in options)
                     if all_resolved:
@@ -277,10 +447,20 @@ class GradedSolver(object):
                         question_text += ")"
 
                     unsolved_questions[part_id] = {
+                        "question_id": part_id,
                         "Question": question_text,
                         "Options": filtered_options,
                         "Type": "CHECKBOX"
                     }
+                    if latest_fb and latest_fb.get("correctness") != "CORRECT":
+                        submitted_ids = latest_fb.get("submitted_chosen") or []
+                        submitted_texts = self._get_response_text(options, submitted_ids) if submitted_ids else []
+                        unsolved_questions[part_id]["previous_attempt"] = {
+                            "status": latest_fb.get("correctness") or "INCORRECT",
+                            "score": f"{latest_fb.get('score', 0)}/{latest_fb.get('max_score', 1)}",
+                            "submitted_options": submitted_texts,
+                            "grader_feedback": latest_fb.get("feedback_text")
+                        }
 
                     incorrect_combs = q.get("incorrect_combinations", [])
                     if incorrect_combs:
@@ -299,6 +479,23 @@ class GradedSolver(object):
                             unsolved_questions[part_id]["previous_attempts"] = virtual_feedbacks
 
             if unsolved_questions:
+                if wrong_answers_page:
+                    logger.info("Grade was below target — sending wrong answers feedback page to LLM for correction.")
+                    llm_prompt = {
+                        "wrong_answers_review_page": wrong_answers_page,
+                        "questions_to_solve": unsolved_questions
+                    }
+                    current_system_prompt = SYSTEM_PROMPT + (
+                        "\n\n=======================================================\n"
+                        "CRITICAL NOTICE: PREVIOUS ATTEMPT SCORED BELOW TARGET GRADE!\n"
+                        "The Coursera feedback review page showing the WRONG ANSWERS and grader explanations is provided in 'wrong_answers_review_page'.\n"
+                        "Carefully analyze each wrong answer and its grader feedback. Fix every error and select the correct answer for each question!\n"
+                        "======================================================="
+                    )
+                else:
+                    llm_prompt = unsolved_questions
+                    current_system_prompt = SYSTEM_PROMPT
+
                 llm_result = None
                 if config.PERPLEXITY_API_KEY:
                     connector = PerplexityConnector()
@@ -310,8 +507,8 @@ class GradedSolver(object):
                         connector = GroqConnector(api_key=key)
                         try:
                             llm_result = connector.get_response(
-                                unsolved_questions,
-                                system_prompt=SYSTEM_PROMPT,
+                                llm_prompt,
+                                system_prompt=current_system_prompt,
                                 response_schema=DEFAULT_RESPONSE_SCHEMA,
                             )
                             break  # success
@@ -326,15 +523,19 @@ class GradedSolver(object):
                 # If we haven't obtained llm_result yet (i.e., using Perplexity or Gemini), fetch it now
                 if llm_result is None:
                     llm_result = connector.get_response(
-                        unsolved_questions,
-                        system_prompt=SYSTEM_PROMPT,
+                        llm_prompt,
+                        system_prompt=current_system_prompt,
                         response_schema=DEFAULT_RESPONSE_SCHEMA,
                     )
                 for ans in llm_result.get("responses", []):
+                    q_id = ans.get("question_id")
+                    q_info = unsolved_questions.get(q_id)
+                    if not q_info:
+                        continue
                     answer_responses.append(
                         self._format_response(
-                            part_id=ans["question_id"],
-                            q_type=unsolved_questions[ans["question_id"]]["Type"],
+                            part_id=q_id,
+                            q_type=q_info["Type"],
                             chosen=ans.get("chosen"),
                             answer=ans.get("answer"),
                         )
@@ -370,6 +571,20 @@ class GradedSolver(object):
                 if outcome.get("isPassed") or earned_grade >= target_grade:
                     logger.success("Passed!")
                     return True
+                else:
+                    logger.warning(
+                        f"Earned grade {earned_grade:.1%} is lower than target grade {target_grade:.1%}. Building wrong answers feedback page..."
+                    )
+                    wrong_answers_page = self.build_wrong_answers_page(
+                        feedback_result, answer_responses, earned_grade, target_grade
+                    )
+                    try:
+                        page_file = self.data_dir / f"{self.course_id}~{self.item_id}_wrong_answers.txt"
+                        page_file.write_text(wrong_answers_page, encoding="utf-8")
+                        with open("wrong_answers.txt", "w", encoding="utf-8") as f:
+                            f.write(wrong_answers_page)
+                    except Exception as e:
+                        logger.debug(f"Could not save wrong_answers.txt: {e}")
 
             random_delay()
 
@@ -436,7 +651,16 @@ class GradedSolver(object):
                 continue
 
             part_id = question["partId"]
-            existing = self.questions_data.get(part_id, {})
+            q_key = part_id.split("~")[-1]
+            existing = self.questions_data.get(part_id)
+            if not existing:
+                for k, v in self.questions_data.items():
+                    if k.split("~")[-1] == q_key:
+                        existing = v
+                        break
+            if not existing:
+                existing = {}
+
             existing_options = existing.get("Options", [])
 
             existing_correctness = {}
@@ -465,6 +689,9 @@ class GradedSolver(object):
 
             if "incorrect_combinations" in existing:
                 questions_formatted[part_id]["incorrect_combinations"] = existing["incorrect_combinations"]
+
+            if "latest_feedback" in existing:
+                questions_formatted[part_id]["latest_feedback"] = existing["latest_feedback"]
 
         self.questions_data.update(questions_formatted)
 
@@ -592,6 +819,11 @@ class GradedSolver(object):
 
             our_part_id = question_lookup.get(feedback_key)
             if not our_part_id:
+                for k in self.questions_data:
+                    if k.split("~")[-1] == feedback_key:
+                        our_part_id = k
+                        break
+            if not our_part_id:
                 continue
 
             fb = part.get("feedback", {})
@@ -599,6 +831,15 @@ class GradedSolver(object):
             outcome = fb.get("autoGradedFeedbackOutcome") or {}
             submitted_chosen = response_lookup.get(our_part_id)
             our_q = self.questions_data[our_part_id]
+
+            grader_fb = clean_cml_or_html(fb.get("feedback", {}).get("cmlValue") or fb.get("feedback", {}).get("htmlWithMetadata", {}).get("html", ""))
+            our_q["latest_feedback"] = {
+                "correctness": correctness,
+                "score": outcome.get("score"),
+                "max_score": outcome.get("maxScore"),
+                "feedback_text": grader_fb,
+                "submitted_chosen": submitted_chosen,
+            }
 
             if our_q.get("correct_answer") or (our_q["Type"] == "MULTIPLE_CHOICE" and any(opt.get("correct") is True for opt in our_q.get("Options", []))) or (our_q["Type"] == "CHECKBOX" and not any(opt.get("correct") is None for opt in our_q.get("Options", []))):
                 continue

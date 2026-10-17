@@ -1,4 +1,5 @@
 import json
+import re
 import httpx
 from ..config import (PERPLEXITY_API_URL, PERPLEXITY_API_KEY,
                       PERPLEXITY_MODEL, GEMINI_API_KEY, GEMINI_MODEL,
@@ -12,7 +13,10 @@ from loguru import logger
 
 class ResponseFormat(BaseModel):
     question_id: str
-    question_type: Literal["MULTIPLE_CHOICE", "CHECKBOX", "TEXT_REFLECT", "RICH_TEXT", "PLAIN_TEXT"]
+    question_type: Literal[
+        "MULTIPLE_CHOICE", "CHECKBOX", "TEXT_REFLECT", "RICH_TEXT",
+        "PLAIN_TEXT", "NUMERIC", "MATH", "TEXT_EXACT_MATCH", "REGEX"
+    ]
     chosen: Optional[List[str]] = None
     answer: Optional[str] = None
 
@@ -59,7 +63,11 @@ class PerplexityConnector(object):
 
         content = response["choices"][0]["message"]["content"]
         if response_schema is not None:
-            return json.loads(content)
+            c = content.strip()
+            if c.startswith("```"):
+                c = re.sub(r"^```(?:json)?\s*", "", c)
+                c = re.sub(r"\s*```$", "", c)
+            return json.loads(c)
         return content.strip()
 
 
@@ -102,7 +110,11 @@ class GroqConnector(object):
 
         content = response["choices"][0]["message"]["content"]
         if response_schema is not None:
-            return json.loads(content)
+            c = content.strip()
+            if c.startswith("```"):
+                c = re.sub(r"^```(?:json)?\s*", "", c)
+                c = re.sub(r"\s*```$", "", c)
+            return json.loads(c)
         return content.strip()
 
 
@@ -143,7 +155,11 @@ class GeminiConnector(object):
 
         raw_text = response.candidates[0].content.parts[0].text
         if response_schema is not None:
-            return json.loads(raw_text)
+            c = raw_text.strip()
+            if c.startswith("```"):
+                c = re.sub(r"^```(?:json)?\s*", "", c)
+                c = re.sub(r"\s*```$", "", c)
+            return json.loads(c)
         return raw_text.strip()
 
 

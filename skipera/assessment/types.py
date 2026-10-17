@@ -7,7 +7,11 @@ WHITELISTED_QUESTION_TYPES = [
     "Submission_MultipleChoiceQuestion",
     "Submission_TextReflectQuestion",
     "Submission_RichTextQuestion",
-    "Submission_PlainTextQuestion"
+    "Submission_PlainTextQuestion",
+    "Submission_NumericQuestion",
+    "Submission_MathQuestion",
+    "Submission_TextExactMatchQuestion",
+    "Submission_RegexQuestion",
 ]
 
 

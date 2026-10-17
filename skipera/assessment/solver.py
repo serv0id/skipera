@@ -36,16 +36,19 @@ SYSTEM_PROMPT = (
     "Each question is a JSON dict containing:\n"
     "- 'Question': the question text.\n"
     "- 'Options': a list of options (for MULTIPLE_CHOICE and CHECKBOX types) with option_id and value.\n"
-    "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', 'TEXT_REFLECT', 'RICH_TEXT', or 'PLAIN_TEXT'.\n"
+    "- 'Type': one of 'MULTIPLE_CHOICE', 'CHECKBOX', 'NUMERIC', 'MATH', 'TEXT_EXACT_MATCH', 'REGEX', 'TEXT_REFLECT', 'RICH_TEXT', or 'PLAIN_TEXT'.\n"
     "- 'previous_attempt': (optional) information on what was submitted in the previous attempt, whether it was INCORRECT, and grader feedback.\n"
     "- 'previous_attempts': (optional, for CHECKBOX) past attempt results with partial scores.\n\n"
     "Rules for each question type:\n"
     "1. MULTIPLE_CHOICE: Single-choice question. Select exactly one option_id and place it in the 'chosen' list. (CRITICAL: You MUST use the exact 'option_id' hash string, do NOT use indices like '1' or '2'!).\n"
     "2. CHECKBOX: Multi-choice question. Select one or more option_ids and place them in the 'chosen' list. (CRITICAL: You MUST use the exact 'option_id' hash strings!).\n"
-    "3. TEXT_REFLECT, RICH_TEXT, PLAIN_TEXT: Open-ended questions with no options. Answer the question prompt thoroughly, thoughtfully, and precisely matching all requirements and guidelines specified in the prompt (e.g., word count, required points, terminology). The response in the 'answer' field must be a high-quality, comprehensive response directly satisfying all criteria in the prompt.\n\n"
+    "3. NUMERIC: Calculation/numerical question with no options. Compute the exact value requested and place the number as a string in the 'answer' field (e.g., '3', '0.5', '-1.25'). Pay attention to instructions like 'without the $ symbol', decimals, rounding, or percentage vs proportion.\n"
+    "4. MATH: Mathematical formula or exact fraction/symbolic question with no options. Provide the simplified fraction, expression, or exact number as requested in the 'answer' field (e.g., '5/8', '0.6', 'x^2'). Follow prompt instructions strictly (e.g., 'simplified fraction').\n"
+    "5. TEXT_EXACT_MATCH, REGEX: Fill-in-the-blank or exact keyword question. Provide the exact required word, phrase, or pattern in the 'answer' field.\n"
+    "6. TEXT_REFLECT, RICH_TEXT, PLAIN_TEXT: Open-ended written response questions with no options. Answer the question prompt thoroughly, thoughtfully, and precisely matching all requirements and guidelines specified in the prompt. Place your response in the 'answer' field.\n\n"
     "CRITICAL CORRECTION INSTRUCTIONS:\n"
     "When 'wrong_answers_review_page' or 'previous_attempt' is provided, the previous submission was graded below the target grade.\n"
-    "Carefully review the wrong answers and grader feedback! Do NOT repeat known incorrect answers or rejected options. Use the feedback explanations to select the correct answer for each question."
+    "Carefully review the wrong answers and grader feedback! Do NOT repeat known incorrect answers or rejected options. Use the feedback explanations to calculate/select the correct answer for each question."
 )
 
 
@@ -54,7 +57,16 @@ TYPE_LOOKUP = {
     "CHECKBOX": ("checkboxResponse", "chosen"),
     "TEXT_REFLECT": ("textReflectResponse", "answer"),
     "PLAIN_TEXT": ("plainTextResponse", "plainText"),
-    "RICH_TEXT": ("richTextResponse", "richText")
+    "RICH_TEXT": ("richTextResponse", "richText"),
+    "NUMERIC": ("numericResponse", "answer"),
+    "MATH": ("mathResponse", "answer"),
+    "TEXT_EXACT_MATCH": ("textExactMatchResponse", "answer"),
+    "REGEX": ("regexResponse", "answer"),
+}
+
+OPEN_ENDED_OR_VALUE_TYPES = {
+    "TEXT_REFLECT", "RICH_TEXT", "PLAIN_TEXT",
+    "NUMERIC", "MATH", "TEXT_EXACT_MATCH", "REGEX"
 }
 
 
@@ -160,14 +172,32 @@ class GradedSolver(object):
                     }
                 }
             }
-        else:
-            response_key, val_key = TYPE_LOOKUP.get(q_type, (f"{q_type.lower()}Response", "answer"))
+        elif q_type in {"NUMERIC", "MATH", "TEXT_EXACT_MATCH", "REGEX"}:
+            if answer is not None:
+                val = str(answer).strip()
+            elif chosen and len(chosen) > 0 and chosen[0] is not None:
+                val = str(chosen[0]).strip()
+            else:
+                val = ""
+            response_key, val_key = TYPE_LOOKUP[q_type]
             return {
                 "questionId": part_id,
                 "questionType": q_type,
                 "questionResponse": {
                     response_key: {
-                        val_key: answer
+                        val_key: val
+                    }
+                }
+            }
+        else:
+            response_key, val_key = TYPE_LOOKUP.get(q_type, (f"{q_type.lower()}Response", "answer"))
+            val = answer if answer is not None else (chosen[0] if chosen else "")
+            return {
+                "questionId": part_id,
+                "questionType": q_type,
+                "questionResponse": {
+                    response_key: {
+                        val_key: str(val).strip() if val is not None else ""
                     }
                 }
             }
@@ -259,7 +289,13 @@ class GradedSolver(object):
                     chosen_strs.append(f'"{cval}" (option_id: {cid})')
                 submitted_str = ", ".join(chosen_strs)
             elif "numericResponse" in part and part["numericResponse"]:
-                submitted_str = str(part["numericResponse"].get("answer", ""))
+                submitted_str = str(part["numericResponse"].get("answer", "") or "")
+            elif "mathResponse" in part and part["mathResponse"]:
+                submitted_str = str(part["mathResponse"].get("answer", "") or "")
+            elif "textExactMatchResponse" in part and part["textExactMatchResponse"]:
+                submitted_str = str(part["textExactMatchResponse"].get("answer", "") or "")
+            elif "regexResponse" in part and part["regexResponse"]:
+                submitted_str = str(part["regexResponse"].get("answer", "") or "")
             elif "plainTextResponse" in part and part["plainTextResponse"]:
                 submitted_str = part["plainTextResponse"].get("plainText", "")
             elif "richTextResponse" in part and part["richTextResponse"]:
@@ -309,6 +345,12 @@ class GradedSolver(object):
         # Overwrite minimum passing score
         target_grade = 0.8
         wrong_answers_page = None
+        page_file = self.data_dir / f"{self.course_id}~{self.item_id}_wrong_answers.txt"
+        if page_file.exists():
+            try:
+                wrong_answers_page = page_file.read_text(encoding="utf-8")
+            except Exception:
+                pass
 
         while True:
             state = self.get_state()
@@ -370,7 +412,7 @@ class GradedSolver(object):
                 options = q.get("Options", [])
                 latest_fb = q.get("latest_feedback", {})
 
-                if q_type in {"TEXT_REFLECT", "RICH_TEXT", "PLAIN_TEXT"}:
+                if q_type in OPEN_ENDED_OR_VALUE_TYPES:
                     if q.get("correct_answer"):
                         answer_responses.append(self._format_response(
                             part_id=part_id,
@@ -402,6 +444,9 @@ class GradedSolver(object):
                         continue
 
                     filtered_options = [opt for opt in options if opt.get("correct") is not False]
+                    if not filtered_options:
+                        filtered_options = options
+
                     if len(filtered_options) == 1:
                         answer_responses.append(self._format_response(
                             part_id=part_id,
@@ -541,6 +586,11 @@ class GradedSolver(object):
                         )
                     )
             else:
+                if wrong_answers_page is not None:
+                    logger.warning(
+                        "No more unsolved questions to improve, but earned grade is below target. Stopping to avoid draining attempts."
+                    )
+                    return False
                 logger.info(
                     "All questions already correct — resubmitting same answers.")
 
@@ -569,6 +619,11 @@ class GradedSolver(object):
                 )
 
                 if outcome.get("isPassed") or earned_grade >= target_grade:
+                    if page_file.exists():
+                        try:
+                            page_file.unlink()
+                        except Exception:
+                            pass
                     logger.success("Passed!")
                     return True
                 else:
@@ -669,17 +724,20 @@ class GradedSolver(object):
                     existing_correctness[opt["value"]] = opt["correct"]
 
             options = []
-            options_schema = question["questionSchema"].get("options") or []
+            options_schema = question.get("questionSchema", {}).get("options") or []
             for option in options_schema:
-                val = option["display"]["cmlValue"]
+                val = option.get("display", {}).get("cmlValue") or option.get("display", {}).get("htmlWithMetadata", {}).get("html", "")
                 options.append({
-                    "option_id": option["optionId"],
+                    "option_id": option.get("optionId", ""),
                     "value": val,
                     "correct": existing_correctness.get(val, None)
                 })
 
+            prompt_obj = question.get("questionSchema", {}).get("prompt", {})
+            prompt_text = prompt_obj.get("cmlValue") or prompt_obj.get("htmlWithMetadata", {}).get("html", "")
+
             questions_formatted[part_id] = {
-                "Question": question["questionSchema"]["prompt"]["cmlValue"],
+                "Question": prompt_text,
                 "Options": options,
                 "Type": QUESTION_TYPE_MAP[question["__typename"]][1],
             }
@@ -847,9 +905,11 @@ class GradedSolver(object):
             all_options = our_q.get("Options", [])
             question_type = our_q["Type"]
 
-            if question_type in {"TEXT_REFLECT", "RICH_TEXT", "PLAIN_TEXT"}:
-                if correctness == "CORRECT" or not correctness:
+            if question_type in OPEN_ENDED_OR_VALUE_TYPES:
+                if correctness == "CORRECT" or (not correctness and (outcome.get("score") == outcome.get("maxScore") and outcome.get("maxScore", 0) > 0)):
                     our_q["correct_answer"] = submitted_chosen
+                else:
+                    our_q["correct_answer"] = None
                 continue
 
             is_single = question_type == "MULTIPLE_CHOICE"

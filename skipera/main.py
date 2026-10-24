@@ -429,7 +429,7 @@ def list_enrolled_courses() -> None:
         output_lines.append(f"Slug     : {res['slug']}")
         output_lines.append(f"Progress : {res['completed']} / {res['total']} completed ({percentage})")
         output_lines.append(f"Command  : python -m skipera.main {res['slug']} --llm")
-        output_lines.append(f"UV Cmd   : uv run skipera {res['slug']} --llm")
+        output_lines.append(f"UV Cmd   : uv run python -m skipera.main {res['slug']} --llm")
         output_lines.append("-" * 60)
     
     output_text = "\n".join(output_lines)

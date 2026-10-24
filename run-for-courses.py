@@ -523,7 +523,7 @@ def main():
         else:
             print("[?] Running skipera...")
 
-        cmd = ["uv", "run", "skipera", slug]
+        cmd = [sys.executable, "-m", "skipera.main", slug]
         if args.llm:
             cmd.append("--llm")
 

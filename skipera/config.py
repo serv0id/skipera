@@ -45,8 +45,14 @@ def fetch_browser_cookies() -> dict:
     for name, browser_fn in browsers:
         try:
             cj = browser_fn(domain_name=".coursera.org")
-            cookies = {c.name: c.value for c in cj}
-            if "CAUTH" in cookies:
+            cookies = {}
+            for c in cj:
+                if c.name in cookies and cookies[c.name] and not c.value:
+                    continue
+                if c.name in cookies and cookies[c.name] and not c.domain.startswith('.'):
+                    continue
+                cookies[c.name] = c.value
+            if cookies.get("CAUTH"):
                 logger.success(f"Fetched Coursera cookies from {name}")
                 return cookies
         except Exception as e:
@@ -70,8 +76,12 @@ def fetch_browser_cookies() -> dict:
             f.write("for n, fn in [('Chrome', browser_cookie3.chrome), ('Firefox', browser_cookie3.firefox), ('Edge', browser_cookie3.edge)]:\n")
             f.write("    try:\n")
             f.write("        cj = fn(domain_name='.coursera.org')\n")
-            f.write("        c = {x.name: x.value for x in cj}\n")
-            f.write("        if 'CAUTH' in c:\n")
+            f.write("        c = {}\n")
+            f.write("        for x in cj:\n")
+            f.write("            if x.name in c and c[x.name] and not x.value: continue\n")
+            f.write("            if x.name in c and c[x.name] and not x.domain.startswith('.'): continue\n")
+            f.write("            c[x.name] = x.value\n")
+            f.write("        if c.get('CAUTH'):\n")
             f.write("            cookies = c\n")
             f.write("            break\n")
             f.write("    except Exception:\n")
@@ -113,11 +123,11 @@ def load_config() -> dict:
 
     config = json.loads(CONFIG_FILE.read_text())
 
-    if not config.get("cookies"):
+    if not config.get("cookies") or not config.get("cookies", {}).get("CAUTH"):
         logger.info(
-            "No cookies in config — attempting to fetch from browser...")
+            "No valid CAUTH cookie in config -- attempting to fetch from browser...")
         cookies = fetch_browser_cookies()
-        if cookies:
+        if cookies and cookies.get("CAUTH"):
             config["cookies"] = cookies
             CONFIG_FILE.write_text(json.dumps(config, indent=2))
             logger.info(f"Cookies saved to {CONFIG_FILE}")

@@ -2,6 +2,7 @@ courses_summary.txt
 courses
 output.list
 wrong_answers.txt
+certificates/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -22,7 +22,7 @@ def get_browser_cookies() -> list[dict]:
     """Fetch active cookies and format them for Playwright."""
     logger.info("Fetching Coursera cookies from browser...")
     raw_cookies = fetch_browser_cookies()
-    if not raw_cookies or "CAUTH" not in raw_cookies:
+    if not raw_cookies or not raw_cookies.get("CAUTH"):
         logger.error("Could not find a valid CAUTH cookie. Please log in to Coursera in your browser.")
         return []
 
@@ -173,6 +173,7 @@ def run_enrollment(slugs: list[str], headless: bool = False, wait_seconds: int =
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
         )
         context.add_cookies(cookies)
+        logger.info(f"Injected {len(cookies)} authentication cookies into browser session.")
         page = context.new_page()
 
         success_count = 0
@@ -238,6 +239,7 @@ END-TO-END WORKFLOW WITH SKIPERA:
 
 HOW ENROLLMENT WORKS:
   - Fetches active Coursera session cookies from your browser (Chrome/Firefox/Edge).
+  - Injects cookies into a Playwright browser session (Edge/Chrome).
   - Waits 10 seconds for Coursera & organization portals (e.g. NMIMS) to fully hydrate.
   - Checks if you are already enrolled ('Go to Course' / 'Resume').
   - Clicks enrollment buttons ('Enroll for free', 'Start Guided Project', 'Enroll').

@@ -14,16 +14,16 @@ class Watcher(object):
         self.course_id = course_id
 
     def watch_item(self) -> bool:
-        if self.metadata["can_skip"]:
+        if self.metadata.get("can_skip"):
             logger.debug("Skippable video!")
-            self.end_item()
+            return self.end_item()
         else:
             self.start_item()
-            self.update_progress()
-            self.end_item()
-        return True
+            progress_ok = self.update_progress()
+            end_ok = self.end_item()
+            return progress_ok or end_ok
 
-    def start_item(self):
+    def start_item(self) -> bool:
         """
         Start watching a video item.
         """
@@ -33,9 +33,11 @@ class Watcher(object):
                                 data='{"contentRequestBody":{}}')
 
         if res.status_code != 200:
-            logger.error(f"Couldn't start video {self.item['name']}!")
+            logger.error(f"Couldn't start video {self.item['name']}: {res.status_code}")
+            return False
+        return True
 
-    def end_item(self):
+    def end_item(self) -> bool:
         """
         End watching a video item.
         Can be called directly for a skippable video.
@@ -46,21 +48,29 @@ class Watcher(object):
                                 data='{"contentRequestBody":{}}')
 
         if res.status_code != 200:
-            logger.error(f"Couldn't end watching {self.item['name']}")
+            logger.error(f"Couldn't end watching {self.item['name']}: {res.status_code}")
+            return False
+        return True
 
-    def update_progress(self):
+    def update_progress(self) -> bool:
         """
         Updates the watchtime progress of a video.
         """
+        tracking_id = self.metadata.get("tracking_id")
+        if not tracking_id:
+            return False
+
         res = self.session.put(url=f'{config.BASE_URL}onDemandVideoProgresses.v1/{self.user_id}~{self.course_id}~'
-                               f'{self.metadata["tracking_id"]}',
+                               f'{tracking_id}',
                                headers=get_csrf_headers(self.session),
                                json={
-                                   "videoProgressId": f'{self.user_id}~{self.course_id}~{self.metadata["tracking_id"]}',
+                                   "videoProgressId": f'{self.user_id}~{self.course_id}~{tracking_id}',
                                    "viewedUpTo": self.item["timeCommitment"] + 2000
         })
 
         if res.status_code != 204:
-            logger.error(f"Couldn't update progress for {self.item['name']}")
+            logger.error(f"Couldn't update progress for {self.item['name']}: {res.status_code}")
+            return False
         else:
             random_delay(1.0, 3.0)
+            return True

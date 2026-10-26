@@ -1,3 +1,4 @@
+import time
 import httpx
 from loguru import logger
 from .. import config
@@ -56,26 +57,31 @@ class CoachSolver(object):
             },
         ]
 
-        res = self.session.post(
-            config.GRAPHQL_URL,
-            params=params,
-            headers=get_csrf_headers(self.session),
-            json=json_data
-        )
+        for coach_attempt in range(2):
+            res = self.session.post(
+                config.GRAPHQL_URL,
+                params=params,
+                headers=get_csrf_headers(self.session),
+                json=json_data
+            )
 
-        if res.status_code != 200:
-            logger.error(f"Failed to update coach item progress: {res.status_code}")
-            return False
+            if res.status_code == 200:
+                try:
+                    res_data = res.json()
+                    if res_data and isinstance(res_data, list):
+                        result = res_data[0].get("data", {}).get("CoachItemProgress_UpdateCoachItemProgress", {})
+                        if result.get("_") is True:
+                            logger.success(f"Successfully completed coach item {self.item_id}")
+                            return True
+                    logger.error(f"Unexpected response from UpdateCoachItemProgress: {res.text}")
+                except Exception as e:
+                    logger.exception(f"Error parsing coach item progress update response: {e}")
+            else:
+                logger.warning(f"Coach item request attempt {coach_attempt + 1}/2 failed: {res.status_code}")
 
-        try:
-            res_data = res.json()
-            if res_data and isinstance(res_data, list):
-                result = res_data[0].get("data", {}).get("CoachItemProgress_UpdateCoachItemProgress", {})
-                if result.get("_") is True:
-                    logger.success(f"Successfully completed coach item {self.item_id}")
-                    return True
-            logger.error(f"Unexpected response from UpdateCoachItemProgress: {res.text}")
-            return False
-        except Exception as e:
-            logger.exception(f"Error parsing coach item progress update response: {e}")
-            return False
+            if coach_attempt + 1 < 2:
+                import time
+                time.sleep(2.0)
+
+        logger.error(f"Failed to complete coach item {self.item_id} after 2 attempts — skipping.")
+        return False

@@ -78,10 +78,18 @@ class GeminiConnector(object):
         logger.debug("Making an API request to Gemini...")
         config_args = {
             "system_instruction": system_prompt,
-            "thinking_config": types.ThinkingConfig(
-                thinking_level="low",
-            ),
         }
+
+        # ``thinking_level`` is supported by newer google-genai releases and
+        # is the correct setting for Gemini 3 models. Older releases reject it
+        # during Pydantic validation, so leave thinking at the model default
+        # instead of failing before the request is sent.
+        thinking_fields = getattr(types.ThinkingConfig, "model_fields", {})
+        if "thinking_level" in thinking_fields:
+            config_args["thinking_config"] = types.ThinkingConfig(
+                thinking_level="low",
+            )
+
         if response_schema is not None:
             config_args["response_schema"] = response_schema
 

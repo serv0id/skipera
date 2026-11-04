@@ -11,7 +11,7 @@ from ..config import GRAPHQL_URL, CONFIG_DIR
 from .queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                       INITIATE_ATTEMPT_QUERY, ASSIGNMENT_FEEDBACK_QUERY)
 from loguru import logger
-from ..llm.connector import DEFAULT_RESPONSE_SCHEMA, PerplexityConnector, GeminiConnector
+from ..llm.connector import DEFAULT_RESPONSE_SCHEMA, PerplexityConnector, GeminiConnector, OpenRouterConnector
 from ..session_utils import get_csrf_headers, random_delay
 
 
@@ -242,6 +242,8 @@ class GradedSolver(object):
                     connector = PerplexityConnector()
                 elif config.GEMINI_API_KEY:
                     connector = GeminiConnector()
+                elif config.OPENROUTER_API_KEY:
+                    connector = OpenRouterConnector()
                 else:
                     raise RuntimeError("No API Key specified.")
 

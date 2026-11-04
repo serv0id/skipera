@@ -12,7 +12,7 @@ from .session_utils import get_csrf_headers, random_delay
 
 
 class Skipera(object):
-    def __init__(self, course: str, llm: bool):
+    def __init__(self, course: str, llm: bool, modules: int | None = None):
         self.user_id = None
         self.course_id = None
         self.base_url = BASE_URL
@@ -21,6 +21,7 @@ class Skipera(object):
         self.session.cookies.update(COOKIES)
         self.course = course
         self.llm = llm
+        self.modules = modules
         self.failed_items = set()
         if not self.get_userid():
             self.refresh_cookies()
@@ -62,6 +63,13 @@ class Skipera(object):
         logger.info("Number of Modules: " +
                     str(len(r["linked"]["onDemandCourseMaterialModules.v1"])))
         logger.info("Total items: " + str(len(all_items)))
+
+        if self.modules:
+            module_ids = r["elements"][0].get("moduleIds", [])
+            allowed_module_ids = set(module_ids[:self.modules])
+            all_items = [item for item in all_items if item.get("moduleId") in allowed_module_ids]
+            logger.info(
+                f"Restricting to first {self.modules} module(s): {len(all_items)} item(s) to process.")
 
         self.process_items(all_items)
 
@@ -276,8 +284,9 @@ class Skipera(object):
 @click.command()
 @click.argument('slug')
 @click.option('--llm', is_flag=True, help="Whether to use an LLM to solve graded assignments.")
-def main(slug: str, llm: bool) -> None:
-    skipera = Skipera(slug, llm)
+@click.option('--modules', type=int, default=None, help="Only process the first N modules of the course.")
+def main(slug: str, llm: bool, modules: int | None) -> None:
+    skipera = Skipera(slug, llm, modules)
     skipera.get_course()
 
 if __name__ == '__main__':

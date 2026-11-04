@@ -4,4 +4,4 @@ click==8.3.1
 loguru==0.7.2
 pydantic==2.11.7
 requests==2.32.3
-google-genai>=1.0.0
+google-genai>=1.51.0

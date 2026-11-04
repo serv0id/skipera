@@ -86,9 +86,15 @@ class GeminiConnector(object):
         # instead of failing before the request is sent.
         thinking_fields = getattr(types.ThinkingConfig, "model_fields", {})
         if "thinking_level" in thinking_fields:
+            thinking_level = getattr(
+                getattr(types, "ThinkingLevel", None), "LOW", "low")
             config_args["thinking_config"] = types.ThinkingConfig(
-                thinking_level="low",
+                thinking_level=thinking_level,
             )
+        else:
+            logger.warning(
+                "google-genai <1.51: thinking_level unsupported, "
+                "using model default thinking")
 
         if response_schema is not None:
             config_args["response_schema"] = response_schema

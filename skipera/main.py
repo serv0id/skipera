@@ -1,7 +1,7 @@
 import click
 import httpx
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .config import fetch_browser_cookies, CONFIG_FILE, DEFAULT_CONFIG, BASE_URL, HEADERS, COOKIES
+from .config import fetch_browser_cookies, CONFIG_FILE, DEFAULT_CONFIG, BASE_URL, GRAPHQL_URL, HEADERS, COOKIES
 import json
 from loguru import logger
 from .assessment.solver import GradedSolver
@@ -120,7 +120,7 @@ class Skipera(object):
             concurrent_items = []
             sequential_items = []
             for item in unlocked_items:
-                if item["contentSummary"]["typeName"] not in {"discussionPrompt", "ungradedAssignment", "staffGraded", "phasedPeer"}:
+                if item["contentSummary"]["typeName"] not in {"discussionPrompt", "ungradedAssignment", "staffGraded", "phasedPeer", "ungradedLab"}:
                     concurrent_items.append(item)
                 else:
                     sequential_items.append(item)
@@ -178,6 +178,8 @@ class Skipera(object):
             success = self.ungraded_widget_item(item_id)
         elif item_type == "ungradedLti":
             success = self.ungraded_lti_item(item_id)
+        elif item_type == "ungradedLab":
+            success = self.ungraded_lab_item(item_id)
         else:
             logger.warning(
                 f"[module:{module_id}] [item:{item_id}] Unknown/skipped item type: {item_type} - skipping.")
@@ -270,6 +272,74 @@ class Skipera(object):
             }
         )
         return 200 <= r.status_code < 300
+
+    def ungraded_lab_item(self, item_id) -> bool:
+        membership = self.session.get(
+            self.base_url + "onDemandSessionMemberships.v1/",
+            params={
+                "q": "activeByUserAndCourse",
+                "userId": self.user_id,
+                "courseId": self.course_id,
+                "includes": "sessions",
+                "fields": "onDemandSessions.v1(branchId)"
+            }
+        )
+        if membership.status_code != 200:
+            logger.error(
+                f"Failed to get session branch for ungraded lab {item_id}: {membership.status_code}"
+            )
+            return False
+
+        sessions = membership.json().get("linked", {}).get("onDemandSessions.v1", [])
+        if not sessions or not sessions[0].get("branchId"):
+            logger.error(f"No active session branch found for ungraded lab {item_id}")
+            return False
+
+        operation_name = "MarkUngradedLabComplete"
+        query = (
+            "mutation MarkUngradedLabComplete($input: UngradedLabProgress_MarkItemCompleteInput!) {\n"
+            "  UngradedLabProgress_MarkItemComplete(input: $input) {\n"
+            "    _\n"
+            "    __typename\n"
+            "  }\n"
+            "}\n"
+        )
+        response = self.session.post(
+            GRAPHQL_URL,
+            params={"opname": operation_name},
+            headers=get_csrf_headers(self.session),
+            json=[{
+                "operationName": operation_name,
+                "variables": {
+                    "input": {
+                        "courseId": self.course_id,
+                        "branchId": sessions[0]["branchId"],
+                        "itemId": item_id
+                    }
+                },
+                "query": query
+            }]
+        )
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to mark ungraded lab {item_id} complete: "
+                f"{response.status_code} {response.text}"
+            )
+            return False
+
+        try:
+            result = response.json()
+            if isinstance(result, list):
+                result = result[0]
+            completed = result.get("data", {}).get(
+                "UngradedLabProgress_MarkItemComplete", {}
+            ).get("_") is True
+        except (IndexError, KeyError, TypeError, ValueError):
+            completed = False
+
+        if not completed:
+            logger.error(f"Unexpected response from {operation_name}: {response.text}")
+        return completed
 
 
 @logger.catch

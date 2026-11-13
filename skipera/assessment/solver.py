@@ -7,7 +7,7 @@ import httpx
 
 from .. import config
 from .types import QUESTION_TYPE_MAP, MODEL_MAP, deep_blank_model, WHITELISTED_QUESTION_TYPES
-from ..config import GRAPHQL_URL, CONFIG_DIR
+from ..config import GRAPHQL_URL, CONFIG_DIR, MAX_GRADED_ATTEMPTS
 from .queries import (GET_STATE_QUERY, SAVE_RESPONSES_QUERY, SUBMIT_DRAFT_QUERY,
                       INITIATE_ATTEMPT_QUERY, ASSIGNMENT_FEEDBACK_QUERY)
 from loguru import logger
@@ -98,6 +98,7 @@ class GradedSolver(object):
     def solve(self) -> bool:
         # Overwrite minimum passing score
         target_grade = 0.8
+        submission_attempts = 0
 
         while True:
             state = self.get_state()
@@ -265,6 +266,7 @@ class GradedSolver(object):
                 logger.error(
                     "Could not submit the assignment. Please file an issue.")
                 return False
+            submission_attempts += 1
 
             time.sleep(5.0)
             feedback_result = self.get_feedback()
@@ -285,6 +287,12 @@ class GradedSolver(object):
                 if earned_grade >= target_grade:
                     logger.success("Passed!")
                     return True
+
+            if submission_attempts >= MAX_GRADED_ATTEMPTS:
+                logger.warning(
+                    f"Did not reach the target grade after {MAX_GRADED_ATTEMPTS} attempts; moving on."
+                )
+                return False
 
             random_delay()
 

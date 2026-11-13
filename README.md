@@ -75,3 +75,5 @@ Note that an average 10 question assignment consumes ~5000 input tokens. If you 
 
 Currently, only the single-choice and multiple-choice objective questions are supported in this mode. Note that you might
 not always achieve passing marks due to the LLM hallucinating sometimes.
+
+Graded assessments are attempted up to three times by default. Set `max_graded_attempts` in `~/.skipera/config.json` to change the limit; if the score is still below the target, Skipera moves on to the next item.

@@ -12,7 +12,8 @@ DEFAULT_CONFIG = {
     "perplexity_api_key": "",
     "gemini_api_key": "",
     "perplexity_model": "sonar-pro",
-    "gemini_model": "gemini-3.1-flash-lite"
+    "gemini_model": "gemini-3.1-flash-lite",
+    "max_graded_attempts": 3
 }
 
 
@@ -81,6 +82,11 @@ PERPLEXITY_API_KEY = _config.get("perplexity_api_key", "")
 GEMINI_API_KEY = _config.get("gemini_api_key", "")
 PERPLEXITY_MODEL = _config.get("perplexity_model", "sonar-pro")
 GEMINI_MODEL = _config.get("gemini_model", "gemini-3.1-flash-lite")
+try:
+    MAX_GRADED_ATTEMPTS = max(1, int(_config.get("max_graded_attempts", 3)))
+except (TypeError, ValueError):
+    logger.warning("Invalid max_graded_attempts value; using 3.")
+    MAX_GRADED_ATTEMPTS = 3
 
 HEADERS = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
